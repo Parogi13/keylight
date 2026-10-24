@@ -31,7 +31,10 @@ import numpy as np
 
 from . import video_io
 
-REF_WHITE = float(os.environ.get("KEYLIGHT_HDR_REF_WHITE", 203.0))  # nits for SDR 100%
+# Nits that SDR 100% white maps to. BT.2408 says 203; macOS may display PQ with
+# 100 nits as SDR white, which would make 203 look ~2x too bright (washed out).
+# Pick the value whose gray steps match SDR on the calibration page, set it in .env.
+REF_WHITE = float(os.environ.get("KEYLIGHT_HDR_REF_WHITE", 203.0))
 MAX_NITS = 1000.0  # never encode above this: XDR sustains ~1000 nits full-screen
 
 # --- transfer functions ------------------------------------------------------
@@ -77,11 +80,11 @@ def nits_to_rgb48(rgb_nits: np.ndarray) -> np.ndarray:
     return PQ_LUT16[idx]
 
 
-def sdr_to_nits(frame_bgr: np.ndarray) -> np.ndarray:
+def sdr_to_nits(frame_bgr: np.ndarray, ref_white: float | None = None) -> np.ndarray:
     """8-bit BT.709 BGR frame -> float32 linear BT.2020 RGB in nits (SDR white = REF_WHITE)."""
     lin = BT1886[frame_bgr]                       # relative linear BT.709, BGR
     rgb2020 = cv2.transform(lin, M_BGR709_TO_RGB2020)
-    rgb2020 *= REF_WHITE
+    rgb2020 *= REF_WHITE if ref_white is None else ref_white
     return rgb2020
 
 
