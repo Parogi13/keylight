@@ -134,12 +134,12 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <b>which HDR clip's gray steps (and the 1x patch) look the same as SDR</b>, not lighter or more washed out, not darker?
 In that clip, the 2x&ndash;4x patches should glow brighter than this page's white swatch <span class="white"></span>.</p>
 <div class="row">
- <figure><video src="calibration_sdr.mp4" autoplay muted loop playsinline></video><figcaption>SDR reference</figcaption></figure>
- <figure><video src="calibration_hdr_100.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 100 nits</figcaption></figure>
+ <figure><video src="/calibration/calibration_sdr.mp4" autoplay muted loop playsinline></video><figcaption>SDR reference</figcaption></figure>
+ <figure><video src="/calibration/calibration_hdr_100.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 100 nits</figcaption></figure>
 </div>
 <div class="row">
- <figure><video src="calibration_hdr_140.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 140 nits</figcaption></figure>
- <figure><video src="calibration_hdr_203.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 203 nits (current default)</figcaption></figure>
+ <figure><video src="/calibration/calibration_hdr_140.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 140 nits</figcaption></figure>
+ <figure><video src="/calibration/calibration_hdr_203.mp4" autoplay muted loop playsinline></video><figcaption>HDR, SDR white = 203 nits (current default)</figcaption></figure>
 </div>
 <p>Tell Claude the number of the matching clip, or put <code>KEYLIGHT_HDR_REF_WHITE=&lt;number&gt;</code> in <code>.env</code>
 and restart. Screen reports HDR: <span id="hdr"></span></p>

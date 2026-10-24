@@ -33,7 +33,7 @@ _load_dotenv()
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.responses import FileResponse, RedirectResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
@@ -187,6 +187,11 @@ CALIBRATION = ROOT / "calibration"
 
 
 @app.get("/calibration")
+def calibration_redirect():
+    # The page uses relative video links, which only resolve under /calibration/.
+    return RedirectResponse("/calibration/")
+
+
 @app.get("/calibration/")
 def calibration_page():
     page = CALIBRATION / "index.html"
