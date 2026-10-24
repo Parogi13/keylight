@@ -98,10 +98,16 @@ async def process(file: UploadFile | None = File(None), sample: str | None = For
     suffix = Path(file.filename or "video.mp4").suffix.lower()
     if suffix not in VIDEO_EXT:
         raise HTTPException(400, f"unsupported file type {suffix}")
-    tmp = Path(tempfile.mkstemp(suffix=suffix, dir=OUTPUTS)[1])
-    with tmp.open("wb") as f:
-        shutil.copyfileobj(file.file, f, 8 << 20)
-    return jobs.submit_file(tmp, file.filename or tmp.name, s, move=True).public()
+    fd, name = tempfile.mkstemp(suffix=suffix, dir=OUTPUTS)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            shutil.copyfileobj(file.file, f, 8 << 20)
+        if tmp.stat().st_size == 0:
+            raise HTTPException(400, "The file is empty.")
+        return jobs.submit_file(tmp, file.filename or tmp.name, s, move=True).public()
+    finally:
+        tmp.unlink(missing_ok=True)  # moved into the job dir on success; removed on failure
 
 
 class PathRequest(BaseModel):

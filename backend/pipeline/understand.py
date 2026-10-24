@@ -64,8 +64,16 @@ def keyframes(p: Perception, interval_s: float = 1.0, max_calls: int = MAX_CALLS
     return picks
 
 
+MAX_CANDIDATES = 12
+
+
 def _real(objs):
-    return [o for o in objs if o.id != SALIENT_ID]
+    """Detected objects worth asking about: no saliency blobs, and in a crowd only the
+    largest dozen (more labels than that make the image unreadable for the model)."""
+    real = [o for o in objs if o.id != SALIENT_ID]
+    if len(real) > MAX_CANDIDATES:
+        real = sorted(real, key=lambda o: -(o.box[2] - o.box[0]) * (o.box[3] - o.box[1]))[:MAX_CANDIDATES]
+    return real
 
 
 def _draw_marks(frame: np.ndarray, objs) -> np.ndarray:
