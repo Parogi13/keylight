@@ -9,4 +9,6 @@ frontend/dist/
 samples/*.mp4
 !samples/.gitkeep
 .DS_Store
-.venvbackend/calibration/
+.venv
+backend/calibration/
+
