@@ -8,8 +8,8 @@ Notes
 - Dark frames are gamma-lifted *only for the detector* (the rendered video is never
   touched here). Low-light footage is our target use case and is exactly where
   detectors lose recall, so this is cheap insurance.
-- If nothing is detected in a frame, a spectral-residual saliency blob is used as
-  a fallback pseudo-object (id -1) so the effect never silently disappears.
+- If nothing is detected, the frame is left unchanged (no subject, no effect). An
+  optional spectral-residual saliency fallback exists behind KEYLIGHT_SALIENCY_FALLBACK=1.
 - Masks are stored as packed bits at ~320px wide: tens of MB for a minute of video.
 """
 from __future__ import annotations
@@ -29,6 +29,9 @@ from . import video_io
 MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "yolo11n-seg.pt"
 MASK_LONG_SIDE = 480
 SALIENT_ID = -1
+# Off by default: with no detected subject the frame is left untouched. The saliency
+# fallback picked a different "interesting" region every frame (random glowing).
+SALIENCY_FALLBACK = os.environ.get("KEYLIGHT_SALIENCY_FALLBACK") == "1"
 
 ProgressFn = Callable[[str, float], None]
 
@@ -262,7 +265,7 @@ def run(working: Path, info: video_io.VideoInfo, progress: ProgressFn | None = N
                     continue
                 objs.append(Obj(ids[k], names[clss[k]], float(confs[k]), tuple(xyxy[k]), p.add_mask(m)))
 
-        if not objs:
+        if not objs and SALIENCY_FALLBACK:
             sal = spectral_saliency(frame, mask_w, mask_h)
             ys, xs = np.nonzero(sal)
             if len(xs):

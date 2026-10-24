@@ -52,7 +52,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 jobs = JobManager(OUTPUTS)
 _DEVICE = perceive.pick_device()
 
-DEFAULT_SETTINGS = {"strength": 0.6, "background": 0.35, "glow": 0.35, "smoothing": 0.6,
+DEFAULT_SETTINGS = {"strength": 0.6, "background": 0.15, "glow": 0.35, "smoothing": 0.6,
                     "focus": "", "use_claude": True}
 
 

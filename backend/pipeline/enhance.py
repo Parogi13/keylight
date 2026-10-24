@@ -4,7 +4,7 @@
 
 E (subject): small exposure lift, local-contrast boost, slight saturation boost,
              soft highlight shoulder so nothing clips harshly.
-D (background): luminance reduction plus slight desaturation.
+D (background): luminance reduction only (colour untouched), scaled by subject presence.
 glow: bright parts of the subject, blurred, added back faintly. On SDR screens a
       soft halo makes a region read as brighter than the panel can physically
       show (the glare illusion). Kept faint so it never becomes a neon outline.
@@ -41,7 +41,7 @@ def _dim_lut(k: float) -> np.ndarray:
 @dataclass
 class Params:
     strength: float = 0.6          # subject enhancement 0..1
-    background: float = 0.35       # background luminance reduction 0..0.8
+    background: float = 0.15       # background luminance reduction 0..0.8 (dim only)
     glow: float = 0.35             # glow amount 0..1
 
     @classmethod
@@ -99,14 +99,11 @@ def upsample_region(mask_low: np.ndarray, full_w: int, full_h: int,
 
 
 def background(frame: np.ndarray, k: float) -> np.ndarray:
-    """D(I): slight desaturation, then a linear-light dim by (1 - k). All uint8 work
-    with cv2 (multithreaded): ~2 ms for 1080p instead of ~40 ms in float."""
+    """D(I): a linear-light dim by (1 - k), nothing else. Hue and saturation are left
+    exactly as filmed. One uint8 LUT pass with cv2: ~1 ms for 1080p."""
     if k <= 0:
         return frame
-    gray = cv2.cvtColor(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-    a = 0.35 * k
-    desat = cv2.addWeighted(frame, 1.0 - a, gray, a, 0.0)
-    return cv2.LUT(desat, _dim_lut(round(k, 3)))
+    return cv2.LUT(frame, _dim_lut(round(k, 3)))
 
 
 def enhance(frame: np.ndarray, mask_low: np.ndarray, p: Params) -> np.ndarray:
@@ -117,17 +114,21 @@ def enhance(frame: np.ndarray, mask_low: np.ndarray, p: Params) -> np.ndarray:
     """
     if p.strength <= 0 and p.background <= 0 and p.glow <= 0:
         return frame
+    # No subject in view -> the frame is returned untouched. The background dim fades
+    # in and out with the subject's (temporally smoothed) presence, so there is no pop
+    # when a subject appears or leaves.
+    presence = float(mask_low.max())
+    if presence < 2e-3:
+        return frame
     h, w = frame.shape[:2]
     s = p.strength
     diag = float(np.hypot(w, h))
-    out = background(frame, p.background)
+    out = background(frame, round(p.background * presence, 2))
     if out is frame:
         out = frame.copy()
 
     lh, lw = mask_low.shape
     ys, xs = np.nonzero(mask_low > 2e-3)
-    if len(xs) == 0:
-        return out
     sig_base = diag * 0.012  # full-res sigma of the local-contrast base
     sig_glow = diag * 0.02
     pad = int(3 * max(sig_base, sig_glow if p.glow > 0 else 0)) + 4

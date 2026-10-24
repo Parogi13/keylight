@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type Health, type Job, type Settings } from '../api'
 import Slider from '../components/Slider'
 
-const FALLBACK: Settings = { strength: 0.6, background: 0.35, glow: 0.35, smoothing: 0.6, focus: '', use_claude: true }
+const FALLBACK: Settings = { strength: 0.6, background: 0.15, glow: 0.35, smoothing: 0.6, focus: '', use_claude: true }
 
 type Props = { health: Health | null; onStarted: (id: string) => void; onOpen: (id: string) => void }
 

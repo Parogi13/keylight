@@ -37,7 +37,7 @@ def main() -> int:
     job = work / "job"
     job.mkdir()
     t = time.time()
-    meta = pipeline.process(job, src, {"strength": 0.6, "background": 0.35, "glow": 0.35, "smoothing": 0.6,
+    meta = pipeline.process(job, src, {"strength": 0.6, "background": 0.15, "glow": 0.35, "smoothing": 0.6,
                                        "focus": "", "use_claude": False},
                             lambda s, f, label: None)
     took = time.time() - t

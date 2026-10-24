@@ -29,6 +29,8 @@ FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
 MAX_HEIGHT = 1080
 MAX_FPS = 60
+_BT709, _UNSPECIFIED, _RESERVED = 1, 2, 3  # AVColorSpace values
+BT709_TAGS = ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
 MAX_DURATION_S = int(os.environ.get("KEYLIGHT_MAX_DURATION_S", 900))
 
 
@@ -154,7 +156,7 @@ def normalize(src: str | Path, dst: str | Path, max_height: int = MAX_HEIGHT) ->
         if has_audio:
             cmd += ["-map", "0:a:0"]
         cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "superfast", "-crf", "12",
-                "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+                *BT709_TAGS]
         if has_audio:
             # aresample=async keeps audio aligned to timestamps if the source drifts.
             cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-af", "aresample=async=1:first_pts=0"]
@@ -197,7 +199,11 @@ def iter_frames(path: str | Path) -> Iterator[np.ndarray]:
         stream = c.streams.video[0]
         stream.thread_type = "AUTO"
         for frame in c.decode(stream):
-            yield frame.to_ndarray(format="bgr24")
+            # Use the stream's own matrix; if it is unlabeled, assume BT.709 (what
+            # browsers assume for HD) rather than swscale's SD default (BT.601).
+            cs = int(frame.colorspace) if frame.colorspace is not None else _UNSPECIFIED
+            src = cs if cs not in (_UNSPECIFIED, _RESERVED) else _BT709
+            yield frame.reformat(format="bgr24", src_colorspace=src).to_ndarray()
 
 
 class FrameWriter:
@@ -214,8 +220,13 @@ class FrameWriter:
         if audio_from is not None:
             cmd += ["-i", str(audio_from), "-map", "0:v:0", "-map", "1:a:0?", "-c:a", "copy"]
         cmd += [
+            # RGB -> YUV with the HD matrix (BT.709), limited range, and *label* the
+            # stream. ffmpeg's default is the SD matrix (BT.601) with no tags, which
+            # browsers then decode as BT.709: up to ~40/255 colour error.
+            "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+            *BT709_TAGS,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", str(dst),
+            "-movflags", "+faststart", "-f", "mp4", str(dst),
         ]
         self.dst = Path(dst)
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
