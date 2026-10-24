@@ -19,7 +19,15 @@ else
     [ -x frontend/node_modules/.bin/tsc ] || (cd frontend && npm install)
     (cd frontend && npm run build)
   fi
-  echo "Keylight running at http://localhost:8000"
-  (sleep 2 && open http://localhost:8000 2>/dev/null || true) &
+  echo "Starting Keylight (first start can take ~20 s while PyTorch loads)…"
+  # Open the browser only once the server answers, not after a fixed delay.
+  (for _ in $(seq 1 120); do
+     if curl -sf http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+       echo "Keylight running at http://localhost:8000"
+       open http://localhost:8000 2>/dev/null || true
+       break
+     fi
+     sleep 1
+   done) &
   cd backend && exec python main.py
 fi
