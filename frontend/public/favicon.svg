@@ -1,1 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#101a2b"/><circle cx="16" cy="16" r="9" fill="#f2b33d" opacity=".25"/><circle cx="16" cy="16" r="5" fill="#f2b33d"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs><radialGradient id="g" cx="45%" cy="40%" r="70%"><stop offset="0" stop-color="#FFF6D6"/><stop offset=".55" stop-color="#F8DB86"/><stop offset="1" stop-color="#F5CB5C"/></radialGradient></defs>
+  <rect width="64" height="64" rx="14" fill="#242423"/>
+  <g transform="rotate(-28 32 32)"><rect x="12" y="14" width="40" height="36" rx="12" fill="url(#g)" stroke="#E8EDDF" stroke-width="3.5"/></g>
+</svg>

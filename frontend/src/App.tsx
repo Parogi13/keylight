@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Health } from './api'
+import Wordmark from './components/Logo'
 import Home from './pages/Home'
 import Processing from './pages/Processing'
 import Result from './pages/Result'
@@ -36,8 +37,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <button className="wordmark" onClick={() => go(null)} aria-label="Keylight home">
-          <span className="wordmark-dot" aria-hidden />
-          Keylight
+          <Wordmark />
         </button>
         <span className="locality" title="Video processing runs on this computer">
           {health ? `Processing on this computer (${health.device.toUpperCase()})` : backendDown ? '' : ' '}
