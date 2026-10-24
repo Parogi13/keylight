@@ -86,6 +86,18 @@ class JobManager:
         self.q.put(("rerender", jid, None))
         return j
 
+    def delete(self, jid: str) -> None:
+        """Remove a job and all of its files from disk."""
+        with self.lock:
+            j = self.jobs.get(jid)
+            if j is None:
+                raise KeyError(jid)
+            if j.status in ("queued", "processing"):
+                raise RuntimeError("This video is still being processed. Wait for it to finish, then delete it.")
+            del self.jobs[jid]
+        if j.dir.resolve().parent == self.root.resolve():  # never delete outside outputs/
+            shutil.rmtree(j.dir, ignore_errors=True)
+
     # ---- worker -------------------------------------------------------------
     def _worker(self) -> None:
         while True:

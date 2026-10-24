@@ -96,6 +96,8 @@ export const api = {
     return fetch('/api/process', { method: 'POST', body: form }).then(json<Job>)
   },
 
+  deleteJob: (id: string) => fetch(`/api/jobs/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),
+
   rerender: (id: string, settings: Partial<Settings>) =>
     fetch(`/api/rerender/${id}`, {
       method: 'POST',

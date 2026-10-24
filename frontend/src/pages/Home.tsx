@@ -21,7 +21,7 @@ export default function Home({ health, onStarted, onOpen }: Props) {
   }, [health])
   useEffect(() => {
     api.samples().then(setSamples).catch(() => {})
-    api.jobs().then((j) => setRecent(j.filter((x) => x.status === 'complete').slice(0, 6))).catch(() => {})
+    api.jobs().then((j) => setRecent(j.filter((x) => x.status === 'complete'))).catch(() => {})
   }, [])
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings((s) => ({ ...s, [k]: v }))
@@ -145,12 +145,11 @@ export default function Home({ health, onStarted, onOpen }: Props) {
           )}
           {recent.length > 0 && (
             <div>
-              <h2>Open a finished video</h2>
-              <ul className="chips">
+              <h2>Your videos</h2>
+              <ul className="library">
                 {recent.map((j) => (
-                  <li key={j.id}>
-                    <button className="chip" onClick={() => onOpen(j.id)}>{prettify(j.name)}</button>
-                  </li>
+                  <LibraryItem key={j.id} job={j} onOpen={() => onOpen(j.id)}
+                    onDeleted={() => setRecent((r) => r.filter((x) => x.id !== j.id))} />
                 ))}
               </ul>
             </div>
@@ -158,6 +157,37 @@ export default function Home({ health, onStarted, onOpen }: Props) {
         </section>
       )}
     </div>
+  )
+}
+
+function LibraryItem({ job, onOpen, onDeleted }: { job: Job; onOpen: () => void; onDeleted: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const name = prettify(job.name)
+  async function remove() {
+    try {
+      await api.deleteJob(job.id)
+      onDeleted()
+    } catch (e) {
+      setError((e as Error).message)
+      setConfirming(false)
+    }
+  }
+  return (
+    <li className="library-item">
+      <button className="library-open" onClick={onOpen}>{name}</button>
+      {confirming ? (
+        <span className="library-confirm">
+          <button className="btn-danger" onClick={remove}>Delete</button>
+          <button className="link" onClick={() => setConfirming(false)}>Keep</button>
+        </span>
+      ) : (
+        <button className="library-delete" aria-label={`Delete ${name}`} title="Delete" onClick={() => setConfirming(true)}>
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      )}
+      {error && <p className="error library-error" role="alert">{error}</p>}
+    </li>
   )
 }
 

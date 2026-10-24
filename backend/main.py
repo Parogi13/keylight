@@ -84,6 +84,17 @@ def list_jobs():
     return sorted((j.public() for j in jobs.jobs.values()), key=lambda j: -j["created"])
 
 
+@app.delete("/api/jobs/{jid}")
+def delete_job(jid: str):
+    try:
+        jobs.delete(jid)
+    except KeyError:
+        raise HTTPException(404, "job not found")
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
 @app.post("/api/process")
 async def process(file: UploadFile | None = File(None), sample: str | None = Form(None),
                   settings: str | None = Form(None)):

@@ -13,6 +13,17 @@ export default function Result({ jobId, health, onBack }: Props) {
   const [draft, setDraft] = useState<Settings | null>(null)
   const [busy, setBusy] = useState<{ label: string; progress: number } | null>(null)
   const poll = useRef<number>(0)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  async function remove() {
+    try {
+      await api.deleteJob(jobId)
+      onBack()
+    } catch (e) {
+      setError((e as Error).message)
+      setConfirmDelete(false)
+    }
+  }
 
   const load = useCallback(() => {
     api.result(jobId).then((r) => { setRes(r); setDraft(r.settings) }).catch((e) => setError(e.message))
@@ -63,7 +74,18 @@ export default function Result({ jobId, health, onBack }: Props) {
     <div className="result">
       <div className="result-head">
         <h1 className="result-title">{res.name.replace(/\.[^.]+$/, '')}</h1>
-        <button className="link" onClick={onBack}>Enhance another video</button>
+        <div className="result-actions">
+          {confirmDelete ? (
+            <span className="library-confirm">
+              <span>Delete this video?</span>
+              <button className="btn-danger" onClick={remove}>Delete</button>
+              <button className="link" onClick={() => setConfirmDelete(false)}>Keep</button>
+            </span>
+          ) : (
+            <button className="link" disabled={!!busy} onClick={() => setConfirmDelete(true)}>Delete video</button>
+          )}
+          <button className="link" onClick={onBack}>Enhance another video</button>
+        </div>
       </div>
 
       <WipePlayer
