@@ -146,7 +146,7 @@ class FrameWriter:
             cmd += ["-i", str(audio_from), "-map", "0:v:0", "-map", "1:a:0?", "-c:a", "copy"]
         cmd += [
             "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(dst),
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", str(dst),
         ]
         self.dst = Path(dst)
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
