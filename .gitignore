@@ -1,1 +1,11 @@
+.env.venv/
+__pycache__/
+*.pyc
+backend/outputs/
+backend/models/*.pt
+node_modules/
+frontend/dist/
 .env
+samples/*.mp4
+!samples/.gitkeep
+.DS_Store
