@@ -1,0 +1,46 @@
+{
+  "encoder": "libx265",
+  "ref_white_nits": 203.0,
+  "stream": {
+    "codec_name": "hevc",
+    "codec_tag_string": "hvc1",
+    "profile": "Main 10",
+    "pix_fmt": "yuv420p10le",
+    "color_space": "bt2020nc",
+    "color_transfer": "smpte2084",
+    "color_primaries": "bt2020",
+    "color_range": "tv"
+  },
+  "patches": {
+    "1x white": {
+      "target_nits": 203.0,
+      "decoded_nits": 203.8
+    },
+    "2x white": {
+      "target_nits": 406.0,
+      "decoded_nits": 404.8
+    },
+    "3x white": {
+      "target_nits": 609.0,
+      "decoded_nits": 610.7
+    },
+    "1000 nits": {
+      "target_nits": 1000.0,
+      "decoded_nits": 998.5
+    }
+  },
+  "gray_steps_nits": {
+    "0%": 0.0,
+    "5%": 0.16,
+    "10%": 0.86,
+    "20%": 4.25,
+    "30%": 11.13,
+    "40%": 22.51,
+    "50%": 38.7,
+    "60%": 59.61,
+    "70%": 85.46,
+    "80%": 118.68,
+    "90%": 158.41,
+    "100%": 203.76
+  }
+}

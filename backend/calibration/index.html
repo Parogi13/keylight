@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Keylight HDR calibration</title>
+<style>
+ body{margin:0;background:#101010;color:#ddd;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:24px}
+ h1{font-size:22px;margin:0 0 8px} p{margin:4px 0 16px;max-width:70ch}
+ .row{display:grid;grid-template-columns:1fr 1fr;gap:16px} figure{margin:0}
+ video{width:100%;display:block;background:#000} figcaption{margin-top:6px;color:#aaa}
+ .white{display:inline-block;width:80px;height:24px;background:#fff;vertical-align:middle;margin-left:8px}
+</style></head><body>
+<h1>Keylight HDR calibration</h1>
+<p>Use Safari, auto-brightness off, display brightness around 50&ndash;75%. Pass if: (1) the gray steps
+look the same in both clips, and (2) on the right, the 2x, 3x and 1000-nit patches are clearly brighter
+than the 1x patch and brighter than this page's white swatch <span class="white"></span>.</p>
+<div class="row">
+ <figure><video src="calibration_sdr.mp4" autoplay muted loop playsinline></video>
+  <figcaption>SDR (what Keylight shows today)</figcaption></figure>
+ <figure><video src="calibration_hdr.mp4" autoplay muted loop playsinline></video>
+  <figcaption>HDR (BT.2020 / PQ, 10-bit HEVC)</figcaption></figure>
+</div>
+<p id="hdr"></p>
+<script>
+ document.getElementById('hdr').textContent = 'This screen reports HDR support: ' +
+   (matchMedia('(dynamic-range: high)').matches ? 'yes' : 'no');
+</script>
+</body></html>

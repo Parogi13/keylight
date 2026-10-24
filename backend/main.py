@@ -179,6 +179,26 @@ def files(jid: str, name: str):
     return FileResponse(j.dir / name, headers={"Cache-Control": "no-cache"})
 
 
+CALIBRATION = ROOT / "calibration"
+
+
+@app.get("/calibration")
+@app.get("/calibration/")
+def calibration_page():
+    page = CALIBRATION / "index.html"
+    if not page.exists():
+        raise HTTPException(404, "Run `python scripts/hdr_calibration.py` first.")
+    return FileResponse(page)
+
+
+@app.api_route("/calibration/{name}", methods=["GET", "HEAD"])
+def calibration_file(name: str):
+    f = (CALIBRATION / name).resolve()
+    if f.parent != CALIBRATION.resolve() or not f.exists():
+        raise HTTPException(404, "not found")
+    return FileResponse(f, headers={"Cache-Control": "no-cache"})
+
+
 if DIST.exists():
     app.mount("/", StaticFiles(directory=DIST, html=True), name="ui")
 
