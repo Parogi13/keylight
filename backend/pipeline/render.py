@@ -12,7 +12,6 @@ Latency design
 from __future__ import annotations
 
 import os
-import subprocess
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -23,7 +22,8 @@ import numpy as np
 
 from . import video_io
 from .attention import Attention
-from .enhance import Params, enhance, attention_view
+from . import hdr
+from .enhance import Params, attention_view, enhance, enhance_hdr, hdr_gain
 
 ATTENTION_LONG_SIDE = 960
 
@@ -40,13 +40,6 @@ def _even(x: float) -> int:
     return max(2, int(round(x / 2)) * 2)
 
 
-def publish_original(working: Path, dst: Path) -> None:
-    tmp = dst.with_suffix(".mp4.part")
-    subprocess.run([video_io.FFMPEG, "-v", "error", "-y", "-i", str(working), "-map", "0", "-c", "copy",
-                    "-movflags", "+faststart", "-f", "mp4", str(tmp)], check=True, capture_output=True)
-    tmp.replace(dst)
-
-
 def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Params, out_dir: Path,
            progress: Callable[[str, float], None] | None = None, write_original: bool = True) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -59,20 +52,34 @@ def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Para
     # Fair comparison: the original is re-encoded from the *same decoded frames* with
     # the *same encoder settings* as the enhanced video. Wherever Keylight changes
     # nothing, both files are identical; any visible difference is our effect, not
-    # one side having been compressed one more time than the other.
-    copy_original = False
+    # one side having been compressed one more time than the other. The HDR pair
+    # follows the same rule: both go through the identical SDR->HDR conversion and
+    # HEVC encode; the baseline simply gets zero subject lift.
+    write_original = write_original or not (out_dir / "original.mp4").exists()
+    want_hdr = params.hdr and hdr.available()
+    hdr_error = None if want_hdr or not params.hdr else "no HEVC encoder in this ffmpeg build"
 
-    enc = video_io.FrameWriter(out_dir / "enhanced.mp4.part", W, H, fr, audio)
-    orig = (video_io.FrameWriter(out_dir / "original.mp4.part", W, H, fr, audio)
-            if write_original and not copy_original else None)
-    attw = video_io.FrameWriter(out_dir / "attention.mp4.part", aw, ah, fr, None, crf=23)
+    writers: dict = {
+        "enhanced": video_io.FrameWriter(out_dir / "enhanced.mp4.part", W, H, fr, audio),
+        "attention": video_io.FrameWriter(out_dir / "attention.mp4.part", aw, ah, fr, None, crf=23),
+    }
+    if write_original:
+        writers["original"] = video_io.FrameWriter(out_dir / "original.mp4.part", W, H, fr, audio)
+    if want_hdr:
+        writers["enhanced_hdr"] = hdr.HDRWriter(out_dir / "enhanced_hdr.mp4.part", W, H, fr, audio)
+        if write_original or not (out_dir / "original_hdr.mp4").exists():
+            writers["original_hdr"] = hdr.HDRWriter(out_dir / "original_hdr.mp4.part", W, H, fr, audio)
     n_total = max(1, min(info.frame_count, len(p.frames)))
     coverage = np.zeros(n_total, np.float32)
 
-    def work(t: int, frame: np.ndarray):
+    def work(t: int, frame: np.ndarray) -> dict:
         m_low = att.mask(t)
         coverage[t] = float(m_low.mean())
-        out = enhance(frame, m_low, params)
+        out = {"enhanced": enhance(frame, m_low, params), "original": frame}
+        if want_hdr:
+            base48 = hdr.nits_to_rgb48(hdr.sdr_to_nits(frame))
+            out["original_hdr"] = base48
+            out["enhanced_hdr"] = enhance_hdr(frame, m_low, params, base48)
         small = cv2.resize(frame, (aw, ah), interpolation=cv2.INTER_AREA) if (aw, ah) != (W, H) else frame
         m_small = cv2.resize(m_low, (aw, ah), interpolation=cv2.INTER_LINEAR)
         label, box = None, None
@@ -82,7 +89,8 @@ def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Para
             if o is not None:
                 label = f"{o.cls} #{o.id}" if o.id >= 0 else o.cls
                 box = tuple(v * (aw / W) for v in o.box)
-        return out, attention_view(small, m_small, label, box), frame
+        out["attention"] = attention_view(small, m_small, label, box)
+        return out
 
     workers = _workers()
     window: deque = deque()
@@ -92,11 +100,9 @@ def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Para
             def drain(limit: int):
                 nonlocal written
                 while len(window) > limit:
-                    out, av, src = window.popleft().result()
-                    enc.write(out)
-                    attw.write(av)
-                    if orig is not None:
-                        orig.write(src)
+                    frames = window.popleft().result()
+                    for name, wr in writers.items():
+                        wr.write(frames[name])
                     written += 1
                     if progress and written % 5 == 0:
                         progress("render", written / n_total)
@@ -107,22 +113,20 @@ def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Para
                 window.append(pool.submit(work, t, frame))
                 drain(2 * workers)  # bounded in-flight frames => flat memory
             drain(0)
-        for w in (enc, attw, orig):
-            if w is not None:
-                w.close()
+        for wr in writers.values():
+            wr.close()
     except Exception:
-        for w in (enc, attw, orig):
-            if w is None:
-                continue
+        for wr in writers.values():
             try:
-                w.proc.kill()
+                wr.proc.kill()
             except Exception:
                 pass
         raise
 
-    (out_dir / "enhanced.mp4.part").replace(out_dir / "enhanced.mp4")
-    (out_dir / "attention.mp4.part").replace(out_dir / "attention.mp4")
-    if orig is not None:
-        (out_dir / "original.mp4.part").replace(out_dir / "original.mp4")
+    for name in writers:
+        (out_dir / f"{name}.mp4.part").replace(out_dir / f"{name}.mp4")
     return {"mean_mask_coverage": round(float(coverage[:written].mean()) if written else 0.0, 4),
-            "frames": written, "threads": workers, "original": "stream copy" if copy_original else "re-encoded"}
+            "frames": written, "threads": workers,
+            "hdr": {"enabled": want_hdr, "encoder": hdr.pick_encoder() if want_hdr else None,
+                    "ref_white_nits": hdr.REF_WHITE, "subject_gain": round(hdr_gain(params.strength), 2),
+                    "error": hdr_error}}

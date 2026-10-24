@@ -38,13 +38,13 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from jobs.manager import JobManager  # noqa: E402
-from pipeline import perceive, understand  # noqa: E402
+from pipeline import hdr, perceive, understand  # noqa: E402
 
 OUTPUTS = Path(os.environ.get("KEYLIGHT_OUTPUTS", ROOT / "outputs"))
 SAMPLES = Path(os.environ.get("KEYLIGHT_SAMPLES", ROOT.parent / "samples"))
 DIST = ROOT.parent / "frontend" / "dist"
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}
-SERVABLE = {"original.mp4", "enhanced.mp4", "attention.mp4", "metadata.json"}
+SERVABLE = {"original.mp4", "enhanced.mp4", "attention.mp4", "original_hdr.mp4", "enhanced_hdr.mp4", "metadata.json"}
 
 app = FastAPI(title="Keylight")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -52,7 +52,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 jobs = JobManager(OUTPUTS)
 _DEVICE = perceive.pick_device()
 
-DEFAULT_SETTINGS = {"strength": 0.6, "background": 0.15, "glow": 0.35, "smoothing": 0.6,
+DEFAULT_SETTINGS = {"strength": 0.6, "background": 0.15, "glow": 0.35, "smoothing": 0.6, "hdr": True,
                     "focus": "", "use_claude": True}
 
 
@@ -68,6 +68,7 @@ def _settings(raw: str | dict | None) -> dict:
 @app.get("/api/health")
 def health():
     return {"ok": True, "device": _DEVICE, "claude_available": understand.available(),
+            "hdr_available": hdr.available(), "hdr_encoder": hdr.pick_encoder() if hdr.available() else None,
             "claude_model": understand.DEFAULT_MODEL, "defaults": DEFAULT_SETTINGS}
 
 
@@ -167,6 +168,9 @@ def result(jid: str):
     base = f"/api/files/{jid}"
     return {**j.public(), "original": f"{base}/original.mp4?v={v}", "enhanced": f"{base}/enhanced.mp4?v={v}",
             "attention": f"{base}/attention.mp4?v={v}",
+            # HDR pair (BT.2020/PQ); null when this job has no HDR outputs.
+            "original_hdr": f"{base}/original_hdr.mp4?v={v}" if (j.dir / "original_hdr.mp4").exists() else None,
+            "enhanced_hdr": f"{base}/enhanced_hdr.mp4?v={v}" if (j.dir / "enhanced_hdr.mp4").exists() else None,
             "metadata": json.loads((j.dir / "metadata.json").read_text())}
 
 
