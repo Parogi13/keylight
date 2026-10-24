@@ -91,6 +91,30 @@ def sdr_to_nits(frame_bgr: np.ndarray, ref_white: float | None = None) -> np.nda
 # --- encoding ----------------------------------------------------------------
 HDR_TAGS = ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc",
             "-color_range", "tv"]
+# Write the colour description into the HEVC bitstream itself (VUI). Needed because
+# hevc_videotoolbox drops transfer/primaries: without "PQ" Safari shows the signal
+# as SDR, so reference white (PQ 0.58) appears as dim grey and everything looks
+# washed out. 9 = BT.2020, 16 = SMPTE ST 2084 (PQ), matrix 9 = BT.2020 NCL.
+HEVC_VUI_BSF = ("hevc_metadata=colour_primaries=9:transfer_characteristics=16:"
+                "matrix_coefficients=9:video_full_range_flag=0")
+
+
+def hdr_tags_ok(path: str | Path) -> bool:
+    try:
+        v = next(s for s in video_io.probe(path)["streams"] if s.get("codec_type") == "video")
+    except Exception:
+        return False
+    return v.get("color_transfer") == "smpte2084" and v.get("color_primaries") == "bt2020"
+
+
+def retag(path: str | Path) -> None:
+    """Stream-copy `path` with the HDR colour description forced (no re-encode)."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".retag.mp4")
+    subprocess.run([video_io.FFMPEG, "-v", "error", "-y", "-i", str(path), "-map", "0", "-c", "copy",
+                    "-bsf:v", HEVC_VUI_BSF, *HDR_TAGS, "-tag:v", "hvc1", "-movflags", "+faststart",
+                    str(tmp)], check=True, capture_output=True)
+    tmp.replace(path)
 
 
 @lru_cache(maxsize=1)
@@ -155,7 +179,7 @@ class HDRWriter:
         enc = _encoder_args(self.encoder, width, height, fps)
         pix = enc[enc.index("-pix_fmt") + 1]
         cmd += ["-vf", f"scale=in_range=full:out_color_matrix=bt2020:out_range=tv,format={pix}",
-                *enc, *HDR_TAGS,
+                *enc, *HDR_TAGS, "-bsf:v", HEVC_VUI_BSF,
                 "-tag:v", "hvc1",  # Safari/QuickTime require hvc1, not hev1
                 "-movflags", "+faststart", "-f", "mp4", str(dst)]
         self.dst = Path(dst)
@@ -171,6 +195,11 @@ class HDRWriter:
         err = self.proc.stderr.read().decode() if self.proc.stderr else ""
         if self.proc.wait() != 0:
             raise RuntimeError(f"HDR encode failed ({self.encoder}) for {self.dst}: {err[-2000:]}")
+        # Belt and braces: if any HDR label is still missing, re-label without re-encoding.
+        if not hdr_tags_ok(self.dst):
+            retag(self.dst)
+            if not hdr_tags_ok(self.dst):
+                raise RuntimeError(f"HDR colour labels missing on {self.dst} after re-tagging")
 
     def kill(self) -> None:
         try:
