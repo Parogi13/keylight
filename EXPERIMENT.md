@@ -1,0 +1,109 @@
+# experiment/sam2-metal
+
+Branch for two experiments that sit **next to** the working app (main is untouched):
+
+1. **SAM 2 segmentation:** YOLO proposes objects about once a second; SAM 2.1 (official
+   `facebookresearch/sam2`, Hiera Tiny) segments them precisely and propagates masks
+   through every frame in between.
+2. **Native Metal EDR player:** renders the enhancement live on the XDR display
+   (subject above SDR white, background untouched) instead of encoding an HDR video.
+
+Both plug into what already works:
+
+| Existing piece | Reused by the experiment |
+|---|---|
+| `perceive.Perception` (per-frame objects + masks) | `sam2_perceive.run` returns the same type, so attention, scene cuts, SDR/HDR renderers and the web player work unchanged |
+| `attention.Attention.mask(t)` (smoothed, feathered) | `export_native.py` writes exactly these masks for the Metal player |
+| Scene-cut detector | SAM 2 windows never cross a cut |
+| HDR conversion (BT.1886 to linear, SDR white = reference) | Metal shader uses the same convention: 1.0 = SDR white, above 1.0 = EDR |
+
+Switches: `segmentation_backend: yolo | sam2` (job setting or `KEYLIGHT_SEGMENTATION`);
+renderer = web player with encoded HDR (default) or `native/KeylightPlayer`.
+
+## Run it on the Mac
+
+Use a separate worktree so your normal folder stays on `main`:
+
+```bash
+cd ~/Documents/keylight
+git fetch
+git worktree add ../keylight-sam2-metal experiment/sam2-metal
+cd ../keylight-sam2-metal
+cp ../keylight/.env . 2>/dev/null || true
+```
+
+### 1. Metal EDR calibration (Stage 5, needs no Python)
+
+```bash
+xcode-select --install            # once, if `swift` isn't found
+cd native/KeylightPlayer
+swift run -c release KeylightPlayer --calibration
+```
+
+Pass: the 2x, 3x and 4x patches are visibly brighter than the 1x patch and than white
+UI elsewhere on screen; the HUD shows `EDR headroom` above 1.0 (it rises when you lower
+display brightness). Report the headroom number and any build error verbatim.
+
+### 2. SAM 2 setup + benchmark (Stages 2 to 4)
+
+```bash
+cd ~/Documents/keylight-sam2-metal
+./scripts/setup_sam2.sh                         # isolated .venv-sam2; prints "loads on mps"
+source .venv-sam2/bin/activate
+python scripts/bench_segmentation.py samples/night-drive.mp4 --render
+```
+
+Outputs `bench/<clip>/`: `masks_A_vs_B.mp4` (YOLO | SAM 2 overlay), enhanced renders per
+backend, `bench/report.json` (time, FPS, peak memory, stability, edge alignment).
+
+### 3. SAM 2 masks in the Metal player (Stages 6 and 7)
+
+```bash
+source .venv-sam2/bin/activate
+cd backend && KEYLIGHT_SEGMENTATION=sam2 python main.py     # process a clip in the web UI
+# then, in another terminal:
+python scripts/export_native.py backend/outputs/<job_id>
+cd native/KeylightPlayer && swift run -c release KeylightPlayer ../../backend/outputs/<job_id>/native
+# static test with the exported still frame:
+swift run -c release KeylightPlayer --image ../../backend/outputs/<job_id>/native/still.png \
+                                    --mask  ../../backend/outputs/<job_id>/native/still_mask.png
+```
+
+Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
+C calibration, Up/Down subject brightness.
+
+## Results so far (cloud CPU, 2 cores: **not** representative of the M3 Pro)
+
+Night drive, 97 frames, 1080p:
+
+| | A: YOLO11n-seg + ByteTrack | B: YOLO keyframes + SAM 2.1 Tiny |
+|---|---|---|
+| Mask stability, consecutive-frame IoU (mean / p5) | 0.953 / 0.908 | **0.983 / 0.970** |
+| Edge alignment (boundary gradient vs frame mean) | 5.15 | **7.13** |
+| Tracking gaps | 0 | 0 |
+| Time | **~14 s** | 1,196 s (12 s/frame; grows from 4 s to 15 s/frame as SAM 2's memory bank fills) |
+| A vs B subject agreement (IoU) | 0.886 | |
+
+One short clip: evidence, not proof. The decisive number is SAM 2 speed on MPS.
+
+## Status
+
+| Stage | State |
+|---|---|
+| 1 Inspect + worktree | done |
+| 2 SAM 2 install + image test | done (CPU); MPS: `setup_sam2.sh` checks it |
+| 3 YOLO to SAM 2 propagation | done, verified on CPU |
+| 4 Benchmark harness | done; Mac numbers pending |
+| 5 Metal static EDR | written, **not compiled** (no macOS here) |
+| 6 Metal video (AVPlayer clock, masks mmap'd) | written, not compiled |
+| 7 SAM 2 masks in Metal | wired via `export_native.py`, untested on Mac |
+| 8 Interactive controls | slider, modes, wipe, attention view written |
+| 9 Evaluation | after Mac numbers |
+
+## Known risks
+
+- **SAM 2 speed on MPS is unknown.** If it's far from real time, it stays an offline
+  "precise masks" option and YOLO remains the default.
+- Some SAM 2 ops may fall back to CPU on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1` is set).
+- The Swift code has never been compiled; expect a round of small compiler fixes.
+- `still_mask.png` is loaded as an 8-bit image; the shader reads its red channel.

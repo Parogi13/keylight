@@ -48,6 +48,7 @@ final class MaskStore {
     }
 }
 
+@MainActor
 final class Renderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -84,7 +85,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         desc.fragmentFunction = library.makeFunction(name: "kl_fragment")
         desc.colorAttachments[0].pixelFormat = view.colorPixelFormat
         pipeline = try device.makeRenderPipelineState(descriptor: desc)
-        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+        var cache: CVMetalTextureCache?
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
+        textureCache = cache
         super.init()
         // 1x1 black mask so the shader always has something bound.
         maskTexture = makeMaskTexture(width: 1, height: 1)
@@ -101,7 +104,8 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func loadStill(image: URL, mask: URL?) throws {
         let loader = MTKTextureLoader(device: device)
-        let opts: [MTKTextureLoader.Option: Any] = [.SRGB: false, .textureUsage: MTLTextureUsage.shaderRead.rawValue]
+        let opts: [MTKTextureLoader.Option: Any] = [.SRGB: false,
+                                                    .textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue)]
         let tex = try loader.newTexture(URL: image, options: opts)
         frameTexture = tex
         videoSize = CGSize(width: tex.width, height: tex.height)
@@ -210,7 +214,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             lastHUD = now
             let potential = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
             let peak = min(Double(uniforms.headroom), Double(uniforms.peakLimit))
-            onStats?(String(format: "EDR headroom %.2fx (potential %.1fx)  ·  subject peak %.2fx SDR white  ·  GPU %.2f ms  ·  frame %d",
+            onStats?(String(format: "EDR headroom %.2fx (potential %.1fx)  ·  subject peak %.2fx SDR white  ·  GPU %.2f ms  ·  frame %ld",
                             uniforms.headroom, potential, max(1, peak), gpuMs, frameIndex))
         }
     }

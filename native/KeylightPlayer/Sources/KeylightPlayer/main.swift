@@ -9,6 +9,7 @@
 import AppKit
 import MetalKit
 
+@MainActor
 final class KLView: MTKView {
     var onKey: ((NSEvent) -> Bool)?
     var onDrag: ((CGPoint) -> Void)?
@@ -18,6 +19,7 @@ final class KLView: MTKView {
     override func mouseDragged(with e: NSEvent) { onDrag?(convert(e.locationInWindow, from: nil)) }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var view: KLView!
