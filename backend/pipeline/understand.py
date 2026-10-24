@@ -18,7 +18,7 @@ import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Callable
 
@@ -30,6 +30,7 @@ from .perceive import Perception, SALIENT_ID
 
 DEFAULT_MODEL = os.environ.get("KEYLIGHT_CLAUDE_MODEL", "claude-sonnet-5-5")
 MAX_CALLS = int(os.environ.get("KEYLIGHT_MAX_CLAUDE_CALLS", "60"))
+BUDGET_S = float(os.environ.get("KEYLIGHT_CLAUDE_BUDGET_S", "60"))  # wall-clock cap per video
 IMAGE_LONG_SIDE = 768
 
 SYSTEM = (
@@ -139,7 +140,7 @@ def run(working: Path, p: Perception, focus: str | None = None,
         return {}, stats
     try:
         import anthropic
-        client = anthropic.Anthropic(timeout=25.0, max_retries=1)
+        client = anthropic.Anthropic(timeout=15.0, max_retries=1)
     except Exception as e:  # pragma: no cover
         stats["error"] = f"anthropic SDK unavailable: {e}"
         return {}, stats
@@ -161,27 +162,55 @@ def run(working: Path, p: Perception, focus: str | None = None,
             break
 
     results: dict[int, dict] = {}
-    done = 0
 
     def job(t):
         return t, _ask(client, model, images[t], _real(p.frames[t]), focus, None, t / p.fps)
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        futures = [ex.submit(job, t) for t in kfs]
-        for f in futures:
-            stats["calls"] += 1
-            try:
-                t, r = f.result()
-                if r is not None:
-                    results[t] = r
-                    stats["ok"] += 1
-                else:
-                    stats["failed"] += 1
-            except Exception as e:
-                stats["failed"] += 1
-                stats["error"] = f"{type(e).__name__}: {str(e)[:200]}"
-            done += 1
-            if progress:
-                progress("understand", done / len(kfs))
+    def record(fut_result=None, err: Exception | None = None):
+        stats["calls"] += 1
+        if err is not None:
+            stats["failed"] += 1
+            stats["error"] = f"{type(err).__name__}: {str(err)[:200]}"
+            return
+        t, r = fut_result
+        if r is not None:
+            results[t] = r
+            stats["ok"] += 1
+        else:
+            stats["failed"] += 1
+
+    calls_start = time.time()
+    # Probe with the first keyframe. If Claude is unreachable (venue Wi-Fi, bad key),
+    # stop here instead of waiting on dozens of timeouts: the demo must not stall.
+    try:
+        record(job(kfs[0]))
+    except Exception as e:
+        record(err=e)
+        stats["error"] = f"Claude unreachable, using local choice ({type(e).__name__})"
+        stats["seconds"] = round(time.time() - t0, 2)
+        return results, stats
+    if progress:
+        progress("understand", 1 / len(kfs))
+
+    rest = kfs[1:]
+    deadline = calls_start + BUDGET_S
+    ex = ThreadPoolExecutor(max_workers=6)
+    try:
+        futures = {ex.submit(job, t): t for t in rest}
+        pending = set(futures)
+        while pending:
+            done_set, pending = wait(pending, timeout=max(0.0, deadline - time.time()), return_when=FIRST_COMPLETED)
+            if not done_set:  # budget exhausted: keep what we have, heuristic covers the rest
+                stats["error"] = f"time budget reached after {stats['calls']} of {len(kfs)} frames"
+                break
+            for f in done_set:
+                try:
+                    record(f.result())
+                except Exception as e:
+                    record(err=e)
+                if progress:
+                    progress("understand", stats["calls"] / len(kfs))
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     stats["seconds"] = round(time.time() - t0, 2)
     return results, stats

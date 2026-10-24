@@ -15,6 +15,7 @@ shift hues and a "x0.7" really means 70% of the light.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -22,10 +23,19 @@ import numpy as np
 # sRGB <-> linear lookup tables
 _x = np.arange(256, dtype=np.float32) / 255.0
 TO_LINEAR = np.where(_x <= 0.04045, _x / 12.92, ((_x + 0.055) / 1.055) ** 2.4).astype(np.float32)
-_y = np.linspace(0, 1, 4096, dtype=np.float32)
+_N = 16384  # fine enough that a linear round trip is exact for every 8-bit value
+_y = np.linspace(0, 1, _N, dtype=np.float32)
 TO_SRGB = np.clip(np.where(_y <= 0.0031308, _y * 12.92, 1.055 * np.power(_y, 1 / 2.4) - 0.055) * 255 + 0.5,
                   0, 255).astype(np.uint8)
 LUMA = np.array([0.0722, 0.7152, 0.2126], np.float32)  # BGR order
+
+
+@lru_cache(maxsize=32)
+def _dim_lut(k: float) -> np.ndarray:
+    """8-bit LUT that multiplies *linear* light by (1 - k). Per-channel, so cv2.LUT
+    can apply it to a whole frame in a couple of milliseconds."""
+    lin = TO_LINEAR * (1.0 - k)
+    return TO_SRGB[np.clip(lin * (_N - 1) + 0.5, 0, _N - 1).astype(np.int32)]
 
 
 @dataclass
@@ -58,35 +68,76 @@ def to_linear(frame: np.ndarray) -> np.ndarray:
 
 
 def to_srgb(lin: np.ndarray) -> np.ndarray:
-    idx = np.clip(lin * 4095.0 + 0.5, 0, 4095).astype(np.int32)
+    idx = np.clip(lin * (_N - 1) + 0.5, 0, _N - 1).astype(np.int32)
     return TO_SRGB[idx]
 
 
-def enhance(frame: np.ndarray, mask: np.ndarray, p: Params) -> np.ndarray:
-    """frame: HxWx3 BGR uint8. mask: HxW float32 in [0,1] (full resolution)."""
+_GN = 4096
+
+
+@lru_cache(maxsize=64)
+def _gain_lut(gamma: float, s: float) -> np.ndarray:
+    """Per-pixel gain for the shadow lift as a function of luminance in [0, 1]."""
+    yy = np.linspace(0, 1, _GN, dtype=np.float32)
+    gain = (np.power(yy + 1e-5, gamma) / (yy + 1e-5)) * (1.0 + 0.15 * s)
+    return np.minimum(gain, 1.0 + 7.0 * s).astype(np.float32)
+
+
+def _lut_index(y: np.ndarray) -> np.ndarray:
+    return np.clip(y * (_GN - 1) + 0.5, 0, _GN - 1).astype(np.int32)
+
+
+def upsample_region(mask_low: np.ndarray, full_w: int, full_h: int,
+                    x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+    """Exactly the [y0:y1, x0:x1] window of cv2.resize(mask_low, (full_w, full_h)),
+    without materializing the full-resolution mask."""
+    lh, lw = mask_low.shape
+    sx, sy = lw / full_w, lh / full_h
+    M = np.array([[sx, 0, (x0 + 0.5) * sx - 0.5], [0, sy, (y0 + 0.5) * sy - 0.5]], np.float32)
+    return cv2.warpAffine(mask_low, M, (x1 - x0, y1 - y0),
+                          flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+
+
+def background(frame: np.ndarray, k: float) -> np.ndarray:
+    """D(I): slight desaturation, then a linear-light dim by (1 - k). All uint8 work
+    with cv2 (multithreaded): ~2 ms for 1080p instead of ~40 ms in float."""
+    if k <= 0:
+        return frame
+    gray = cv2.cvtColor(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    a = 0.35 * k
+    desat = cv2.addWeighted(frame, 1.0 - a, gray, a, 0.0)
+    return cv2.LUT(desat, _dim_lut(round(k, 3)))
+
+
+def enhance(frame: np.ndarray, mask_low: np.ndarray, p: Params) -> np.ndarray:
+    """frame: HxWx3 BGR uint8. mask_low: low-res float32 attention mask in [0, 1].
+
+    Only the subject's bounding region is processed in float; everything else is
+    the uint8 background path. Output is HxWx3 uint8.
+    """
     if p.strength <= 0 and p.background <= 0 and p.glow <= 0:
         return frame
     h, w = frame.shape[:2]
-    lin = to_linear(frame)
     s = p.strength
     diag = float(np.hypot(w, h))
+    out = background(frame, p.background)
+    if out is frame:
+        out = frame.copy()
 
-    # ---- background: dim + slight desaturation (whole frame, cheap) ----------
-    k = p.background
-    yb = lin @ LUMA
-    out = lin + (yb[..., None] - lin) * (0.35 * k)
-    out *= (1.0 - k)
-
-    # ---- subject work happens only inside the mask's bounding region --------
-    ys, xs = np.nonzero(mask > 2e-3)
+    lh, lw = mask_low.shape
+    ys, xs = np.nonzero(mask_low > 2e-3)
     if len(xs) == 0:
-        return to_srgb(np.clip(out, 0, 1))
+        return out
     sig_base = diag * 0.012  # full-res sigma of the local-contrast base
     sig_glow = diag * 0.02
     pad = int(3 * max(sig_base, sig_glow if p.glow > 0 else 0)) + 4
-    x0, x1 = max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
-    y0, y1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1)
-    lc, mc, oc = lin[y0:y1, x0:x1], mask[y0:y1, x0:x1, None], out[y0:y1, x0:x1]
+    fx, fy = w / lw, h / lh
+    x0, x1 = max(0, int(xs.min() * fx) - pad), min(w, int((xs.max() + 1) * fx) + pad)
+    y0, y1 = max(0, int(ys.min() * fy) - pad), min(h, int((ys.max() + 1) * fy) + pad)
+
+    mc = upsample_region(mask_low, w, h, x0, y0, x1, y1)[..., None]
+    lc = to_linear(frame[y0:y1, x0:x1])
+    oc = to_linear(out[y0:y1, x0:x1])
     ch, cw = lc.shape[:2]
 
     # Local contrast: boost detail relative to a blurred base (blur at half res).
@@ -101,31 +152,43 @@ def enhance(frame: np.ndarray, mask: np.ndarray, p: Params) -> np.ndarray:
     subject_luma = float((y * mw).sum() / max(mw.sum(), 1e-6))
     dark = float(np.clip(1.0 - subject_luma / 0.18, 0.2, 1.0))
     gamma = 1.0 / (1.0 + 0.7 * s * dark)
-    gain = (np.power(y + 1e-5, gamma) / (y + 1e-5)) * (1.0 + 0.15 * s)
-    e *= np.minimum(gain, 1.0 + 7.0 * s)[..., None]
-    y = e @ LUMA
-    e = y[..., None] + (e - y[..., None]) * (1.0 + 0.15 * s)  # saturation
-    e = _shoulder(np.clip(e, 0, None))
-
-    # Two-zone blend: the lift uses a tighter core (m^2.5) than the dimming (m), so the
-    # feathered edge shows the untouched original rather than lifted background — the
-    # edge reads as a soft pool of light instead of a bright cut-out ring.
-    core = mc ** 2.5
-    blended = (1.0 - mc) * oc + mc * ((1.0 - core) * lc + core * e)
+    e *= _gain_lut(round(gamma, 3), round(s, 3))[_lut_index(y)][..., None]
+    y3 = (e @ LUMA)[..., None]
+    e -= y3                       # saturation: push chroma away from luma, in place
+    e *= 1.0 + 0.15 * s
+    e += y3
+    np.maximum(e, 0, out=e)
+    e = _shoulder(e)
 
     # ---- glow: bright subject pixels, blurred, added faintly -----------------
     # Glow only helps where the scene is dark; on a bright scene it reads as a halo.
-    scene_luma = float(yb[::8, ::8].mean())
+    thumb = cv2.resize(frame, (64, max(1, int(64 * h / w))), interpolation=cv2.INTER_AREA)
+    scene_luma = float((to_linear(thumb) @ LUMA).mean())
     glow = p.glow * float(np.clip(1.0 - scene_luma / 0.12, 0.0, 1.0))
+    halo = None
     if glow > 0 and s > 0:
         q = 4
         small_e = cv2.resize(e * mc, (max(1, cw // q), max(1, ch // q)), interpolation=cv2.INTER_AREA)
         bright = np.clip(small_e - 0.18, 0, None)
-        halo = cv2.GaussianBlur(bright, (0, 0), sig_glow / q)
-        blended += cv2.resize(halo, (cw, ch), interpolation=cv2.INTER_LINEAR) * (0.5 * glow * s)
+        halo = cv2.resize(cv2.GaussianBlur(bright, (0, 0), sig_glow / q), (cw, ch), interpolation=cv2.INTER_LINEAR)
 
-    out[y0:y1, x0:x1] = blended
-    return to_srgb(np.clip(out, 0, 1))
+    # Two-zone blend: the lift uses a tighter core (m^2.5) than the dimming (m), so the
+    # feathered edge shows the untouched original rather than lifted background — the
+    # edge reads as a soft pool of light instead of a bright cut-out ring.
+    #   blended = oc + mc * ((lc + core * (e - lc)) - oc)      (computed in place)
+    core = mc * mc * np.sqrt(mc)
+    e -= lc
+    e *= core
+    e += lc
+    e -= oc
+    e *= mc
+    e += oc
+    blended = e
+    if halo is not None:
+        blended += halo * (0.5 * glow * s)
+
+    out[y0:y1, x0:x1] = to_srgb(np.clip(blended, 0, 1))
+    return out
 
 
 def attention_view(frame: np.ndarray, mask: np.ndarray, label: str | None,
@@ -133,11 +196,11 @@ def attention_view(frame: np.ndarray, mask: np.ndarray, label: str | None,
     """Debug visualization: dim cool-gray background, subject in true color,
     amber contour + label. This is what "Show AI attention" plays."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    bg = cv2.merge([gray, gray, gray]).astype(np.float32) * 0.28
-    bg[..., 0] *= 1.25  # slight blue tint
-    m = mask[..., None]
-    tint = frame.astype(np.float32) * 0.85 + np.array([20, 120, 255], np.float32) * 0.15
-    out = np.clip(m * tint + (1 - m) * bg, 0, 255).astype(np.uint8)
+    bg = cv2.merge([cv2.convertScaleAbs(gray, alpha=0.35), cv2.convertScaleAbs(gray, alpha=0.28),
+                    cv2.convertScaleAbs(gray, alpha=0.28)])  # dim, slightly blue
+    tint = cv2.addWeighted(frame, 0.85, np.full_like(frame, (20, 120, 255)), 0.15, 0)
+    m = np.ascontiguousarray(mask, np.float32)
+    out = cv2.blendLinear(tint, bg, m, 1.0 - m)  # per-pixel alpha blend in uint8
     contour = (mask > 0.5).astype(np.uint8)
     cnts, _ = cv2.findContours(contour, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     th = max(2, frame.shape[1] // 480)

@@ -30,7 +30,10 @@ export default function Processing({ jobId, onComplete, onBack }: Props) {
         if (j.status === 'error') return
       } catch (e) {
         if (!alive) return
-        setError((e as Error).message)
+        const msg = (e as Error).message
+        setError(msg === 'job not found'
+          ? 'This job is no longer running. Keylight may have restarted while it was processing. Start it again from the home screen.'
+          : msg)
         return
       }
       timer = window.setTimeout(tick, 700)

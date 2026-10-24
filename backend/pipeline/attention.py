@@ -20,7 +20,10 @@
 """
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
+
 import cv2
 import numpy as np
 
@@ -62,7 +65,12 @@ class Attention:
     raw: list[int | None]                     # per frame raw target
     segments: list[Segment]
     feather: float
-    _index: dict = field(default_factory=dict)  # (shot, id) -> sorted frames where id present
+    _index: dict = field(default_factory=dict)  # id -> sorted frames where id present
+    # Small per-instance LRU of composed raw masks (the 3-tap filter reuses each one
+    # three times). Bounded so long videos don't grow memory; locked for render threads.
+    _cache: OrderedDict = field(default_factory=OrderedDict, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    CACHE_SIZE = 48
 
     # ---- masks ---------------------------------------------------------------
     def _nearest_mask(self, t: int, oid: int) -> np.ndarray | None:
@@ -85,17 +93,24 @@ class Attention:
         return self.p.mask(o.mask)
 
     def _raw_mask(self, t: int) -> np.ndarray:
+        with self._lock:
+            hit = self._cache.get(t)
+            if hit is not None:
+                self._cache.move_to_end(t)
+                return hit
         m = np.zeros((self.p.mask_h, self.p.mask_w), np.float32)
         for oid, w in self.weights[t].items():
             if w < 1e-3:
                 continue
-            mk = self.mask_cache(t, oid)
+            mk = self._nearest_mask(t, oid)
             if mk is not None:
                 m += w * mk
-        return np.clip(m, 0, 1)
-
-    def mask_cache(self, t, oid):
-        return _cached_mask(self, t, oid)
+        np.clip(m, 0, 1, out=m)
+        with self._lock:
+            self._cache[t] = m
+            while len(self._cache) > self.CACHE_SIZE:
+                self._cache.popitem(last=False)
+        return m
 
     def mask(self, t: int) -> np.ndarray:
         """Feathered low-res attention mask for frame t, float32 in [0, 1]."""
@@ -114,18 +129,6 @@ class Attention:
         sigma = float(np.clip(0.12 * size, 0.8, diag * self.feather))
         acc = cv2.GaussianBlur(acc, (0, 0), sigma)
         return np.clip(acc, 0, 1)
-
-
-_MASK_CACHE: dict = {}
-
-
-def _cached_mask(att: Attention, t: int, oid: int):
-    key = (id(att), t, oid)
-    if key not in _MASK_CACHE:
-        if len(_MASK_CACHE) > 512:
-            _MASK_CACHE.clear()
-        _MASK_CACHE[key] = att._nearest_mask(t, oid)
-    return _MASK_CACHE[key]
 
 
 def _shot_range(p: Perception, t: int) -> tuple[int, int]:
@@ -242,8 +245,10 @@ def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | Non
             onehot = np.array([1.0 if raw[t] == oid else 0.0 for t in range(lo, hi)])
             if not onehot.any():
                 continue
-            num = np.convolve(onehot, kernel, mode="same")
-            den = np.convolve(np.ones(n), kernel, mode="same")  # truncate at cuts, no fade-from-black
+            # 'full' then centre-crop: np.convolve(mode="same") returns len(kernel)
+            # samples when the shot is shorter than the kernel.
+            num = np.convolve(onehot, kernel, mode="full")[half:half + n]
+            den = np.convolve(np.ones(n), kernel, mode="full")[half:half + n]  # truncate at cuts, no fade-from-black
             w = num / den
             if oid == SALIENT_ID:
                 w = w * SALIENT_WEIGHT  # no real subject: stay gentle

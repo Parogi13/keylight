@@ -119,6 +119,9 @@ export default function Result({ jobId, health, onBack }: Props) {
             <div><dt>Subject choice</dt><dd>{m.semantic?.enabled && m.semantic.ok ? `Claude (${m.semantic.ok} still frames sent)` : 'On this computer'}</dd></div>
             <div><dt>Video</dt><dd>{m.video.width}×{m.video.height}, {m.video.fps.toFixed(2).replace(/\.00$/, '')} fps{m.video.has_audio ? ', with sound' : ''}</dd></div>
           </dl>
+          {m.semantic?.enabled && m.semantic.error && (
+            <p className="facts-note">{m.semantic.ok ? 'Some frames fell back to the local choice: ' : 'Claude wasn’t used: '}{m.semantic.error}</p>
+          )}
         </section>
       </div>
     </div>

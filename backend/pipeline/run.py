@@ -91,6 +91,8 @@ def process(job: Path, src: Path, settings: dict, cb: Progress | None = None) ->
     t = time.time(); report("prepare", 0)
     info = video_io.normalize(src, job / "working.mp4")
     timings["prepare"] = time.time() - t
+    if src.parent == job:
+        src.unlink(missing_ok=True)  # the working copy replaces the upload: halve disk use
 
     t = time.time()
     p = perceive.run(job / "working.mp4", info, progress=report)

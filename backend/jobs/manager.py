@@ -107,5 +107,9 @@ class JobManager:
                 j.version += 1
             except Exception as e:
                 traceback.print_exc()
-                j.status, j.error = "error", f"{type(e).__name__}: {e}"[:500]
+                # ValueErrors from the pipeline are written for people; others aren't.
+                msg = str(e) if isinstance(e, ValueError) else f"Something went wrong while processing ({type(e).__name__}: {e})"
+                j.status, j.error = "error", msg[:500]
+                for leftover in j.dir.glob("*.part"):
+                    leftover.unlink(missing_ok=True)
             j.updated = time.time()

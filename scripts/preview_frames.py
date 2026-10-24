@@ -12,7 +12,7 @@ p = perceive.Perception.load(d); att = attention.build(p)
 rows = []; times = []
 for t, f in enumerate(video_io.iter_frames(d / "working.mp4")):
     if t in ts:
-        t0 = time.time(); m = cv2.resize(att.mask(t), (f.shape[1], f.shape[0])); e = enhance.enhance(f, m, params); times.append(time.time() - t0)
+        t0 = time.time(); e = enhance.enhance(f, att.mask(t), params); times.append(time.time() - t0)
         rows.append(np.hstack([f, e]))
     if t > max(ts): break
 img = np.vstack(rows); s = 1600 / img.shape[1]

@@ -31,16 +31,28 @@ export default function WipePlayer({ original, enhanced, attention, showAttentio
   const [dragging, setDragging] = useState(false)
 
   const followers = useCallback(() => [enh.current, att.current].filter(Boolean) as HTMLVideoElement[], [])
+  const showAtt = useRef(showAttention)
+  showAtt.current = showAttention
 
-  // Keep followers locked to the master clock. Small drift is corrected by nudging
-  // playbackRate; large drift (seeks, stalls) by setting currentTime.
+  // Keep the *visible* follower locked to the master clock. Small drift is corrected
+  // by nudging playbackRate; large drift (seeks, stalls) by setting currentTime. The
+  // hidden overlay is paused so the browser decodes two videos, not three; it is
+  // re-synced the moment it becomes visible.
   useEffect(() => {
     let raf = 0
+    let lastUi = -1
     const loop = () => {
       const m = master.current
       if (m) {
-        setTime(m.currentTime)
-        for (const f of followers()) {
+        // Re-render the transport at ~15 Hz, not every animation frame.
+        if (Math.abs(m.currentTime - lastUi) > 1 / 15 || m.paused) {
+          lastUi = m.currentTime
+          setTime(m.currentTime)
+        }
+        const visible = showAtt.current ? att.current : enh.current
+        const hidden = showAtt.current ? enh.current : att.current
+        if (hidden && !hidden.paused) hidden.pause()
+        for (const f of visible ? [visible] : []) {
           const d = f.currentTime - m.currentTime
           if (Math.abs(d) > 0.25 || m.paused) {
             if (Math.abs(d) > 0.02) f.currentTime = m.currentTime

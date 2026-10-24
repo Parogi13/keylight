@@ -13,6 +13,7 @@ Design notes
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, asdict
@@ -28,6 +29,7 @@ FFPROBE = shutil.which("ffprobe") or "ffprobe"
 
 MAX_HEIGHT = 1080
 MAX_FPS = 60
+MAX_DURATION_S = int(os.environ.get("KEYLIGHT_MAX_DURATION_S", 900))
 
 
 @dataclass
@@ -52,7 +54,10 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def probe(path: str | Path) -> dict:
-    out = _run([FFPROBE, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)])
+    try:
+        out = _run([FFPROBE, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)])
+    except RuntimeError:
+        raise ValueError("This file couldn't be opened. It may be damaged or not a video.") from None
     return json.loads(out.stdout)
 
 
@@ -68,6 +73,30 @@ def _choose_fps(stream: dict) -> Fraction:
     return Fraction(30, 1)
 
 
+def _can_remux(meta: dict, v: dict, max_height: int) -> bool:
+    """True if the source can be stream-copied as the working copy."""
+    try:
+        if v.get("codec_name") != "h264" or v.get("pix_fmt") != "yuv420p":
+            return False
+        if min(int(v["width"]), int(v["height"])) > max_height or int(v["width"]) % 2 or int(v["height"]) % 2:
+            return False
+        r, avg = Fraction(v.get("r_frame_rate", "0/1")), Fraction(v.get("avg_frame_rate", "0/1"))
+        if r <= 0 or avg <= 0 or abs(float(r - avg)) > 0.01 or r > MAX_FPS:
+            return False  # variable frame rate (phones) -> needs resampling
+        if any(sd.get("side_data_type", "").lower().startswith("display matrix") for sd in v.get("side_data_list", [])):
+            return False  # rotated phone video -> let ffmpeg bake in the rotation
+        if (v.get("tags") or {}).get("rotate") not in (None, "0"):
+            return False
+        if v.get("color_transfer") in ("smpte2084", "arib-std-b67"):
+            return False  # HDR -> needs tone mapping
+        if abs(float(v.get("start_time", 0) or 0)) > 0.001:
+            return False
+        sar = v.get("sample_aspect_ratio", "1:1")
+        return sar in ("1:1", "0:1", None)
+    except Exception:
+        return False
+
+
 def normalize(src: str | Path, dst: str | Path, max_height: int = MAX_HEIGHT) -> VideoInfo:
     """Create a constant-frame-rate, browser-safe, near-lossless working copy.
 
@@ -77,28 +106,68 @@ def normalize(src: str | Path, dst: str | Path, max_height: int = MAX_HEIGHT) ->
     meta = probe(src)
     vstreams = [s for s in meta["streams"] if s.get("codec_type") == "video"]
     if not vstreams:
-        raise ValueError("input has no video stream")
+        raise ValueError("This file has no video track.")
+    dur = float(meta.get("format", {}).get("duration") or 0)
+    if dur > MAX_DURATION_S:
+        raise ValueError(f"This video is {dur / 60:.0f} minutes long. Keylight handles clips up to "
+                         f"{MAX_DURATION_S // 60} minutes; trim it first.")
     v = vstreams[0]
     has_audio = any(s.get("codec_type") == "audio" for s in meta["streams"])
     fps = _choose_fps(v)
 
+    if _can_remux(meta, v, max_height):
+        # Already constant-frame-rate, browser-safe H.264 at a sane size: copy the
+        # video stream (seconds instead of a full transcode). Audio is made AAC.
+        cmd = [FFMPEG, "-v", "error", "-y", "-i", str(src), "-map", "0:v:0", "-c:v", "copy"]
+        if has_audio:
+            a = next(s for s in meta["streams"] if s.get("codec_type") == "audio")
+            # Copy AAC as-is: re-encoding would add encoder priming delay (~21 ms).
+            acodec = ["-c:a", "copy"] if a.get("codec_name") == "aac" else ["-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+            cmd += ["-map", "0:a:0", *acodec]
+        cmd += ["-movflags", "+faststart", str(dst)]
+        try:
+            _run(cmd)
+            out = info(dst)
+            if out.frame_count > 0:
+                return out
+        except Exception:
+            pass  # fall through to the full normalize
+
     m = max_height
-    # Scale so min(w, h) <= m, keep aspect, force even dimensions (yuv420p).
-    vf = (
-        f"fps={fps.numerator}/{fps.denominator},"
-        f"scale='trunc(iw*min(1,{m}/min(iw,ih))/2)*2':'trunc(ih*min(1,{m}/min(iw,ih))/2)*2',"
-        "setsar=1,format=yuv420p"
-    )
-    cmd = [FFMPEG, "-v", "error", "-y", "-i", str(src), "-map", "0:v:0"]
-    if has_audio:
-        cmd += ["-map", "0:a:0"]
-    cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "12"]
-    if has_audio:
-        # aresample=async keeps audio aligned to timestamps if the source drifts.
-        cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-af", "aresample=async=1:first_pts=0"]
-    cmd += ["-movflags", "+faststart", str(dst)]
-    _run(cmd)
-    return info(dst)
+    scale = f"scale='trunc(iw*min(1,{m}/min(iw,ih))/2)*2':'trunc(ih*min(1,{m}/min(iw,ih))/2)*2'"
+    base = f"fps={fps.numerator}/{fps.denominator},{scale},setsar=1"
+    hdr = v.get("color_transfer") in ("smpte2084", "arib-std-b67")
+    chains = []
+    if hdr:
+        # iPhone / HDR footage (HLG or PQ, BT.2020). Without tone mapping it looks
+        # grey and washed out in SDR. zscale needs libzimg; fall back if missing.
+        tin = v.get("color_transfer")
+        chains.append(
+            f"zscale=tin={tin}:pin=bt2020:min=bt2020nc:t=linear:npl=100,format=gbrpf32le,"
+            "zscale=p=bt709,tonemap=mobius:desat=0,zscale=t=bt709:m=bt709:r=tv,"
+            f"format=yuv420p,{base}")
+    chains.append(f"{base},format=yuv420p")
+
+    last_err = None
+    for vf in chains:
+        cmd = [FFMPEG, "-v", "error", "-y", "-i", str(src), "-map", "0:v:0"]
+        if has_audio:
+            cmd += ["-map", "0:a:0"]
+        cmd += ["-vf", vf, "-c:v", "libx264", "-preset", "superfast", "-crf", "12",
+                "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
+        if has_audio:
+            # aresample=async keeps audio aligned to timestamps if the source drifts.
+            cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-af", "aresample=async=1:first_pts=0"]
+        cmd += ["-movflags", "+faststart", str(dst)]
+        try:
+            _run(cmd)
+            out = info(dst)
+            if out.frame_count <= 0:
+                raise ValueError("no frames could be decoded")
+            return out
+        except Exception as e:  # try the next (simpler) chain
+            last_err = e
+    raise ValueError(f"This file couldn't be read as a video ({str(last_err).splitlines()[-1][:200]})")
 
 
 def info(path: str | Path) -> VideoInfo:

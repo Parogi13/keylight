@@ -216,6 +216,7 @@ input[type='range']::-moz-range-thumb { width: 18px; height: 18px; border-radius
 .panel-facts dl div { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--rim); padding-bottom: 10px; }
 .panel-facts dt { color: var(--mist); }
 .panel-facts dd { margin: 0; text-align: right; }
+.facts-note { color: var(--mist); font-size: var(--step--1); margin: 0; }
 .keys { color: var(--mist); font-size: var(--step--1); margin: 0; }
 
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--night); border-radius: 999px; padding: 4px; gap: 4px; }
