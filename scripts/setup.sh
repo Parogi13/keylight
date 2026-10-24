@@ -25,7 +25,7 @@ print("model ready:", Path("yolo11n-seg.pt").resolve())
 EOF
 python -c "import torch; print('MPS available:', torch.backends.mps.is_available())"
 
-(cd frontend && npm install --silent && npm run build --silent)
+(cd frontend && npm install && npm run build)
 [ -f .env ] || cp .env.example .env
 echo
 echo "Setup done. Add your ANTHROPIC_API_KEY to .env (optional), then run ./scripts/start.sh"
