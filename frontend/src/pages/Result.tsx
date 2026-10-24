@@ -101,7 +101,7 @@ export default function Result({ jobId, health, onBack }: Props) {
           <Slider label="Smoothness" format={pct} value={draft.smoothing} onChange={(v) => set('smoothing', v)} />
           <div className="field">
             <label htmlFor="focus2">What should Keylight follow?</label>
-            <input id="focus2" type="text" disabled={!claude} placeholder={claude ? 'Follow whoever is speaking' : 'Needs an Anthropic API key'}
+            <input id="focus2" type="text" disabled={!claude} placeholder={claude ? 'Follow the person on the left' : 'Needs an Anthropic API key'}
               value={draft.focus} onChange={(e) => set('focus', e.target.value)} />
           </div>
           <button className="btn btn-key" disabled={!dirty || !!busy} onClick={apply}>
