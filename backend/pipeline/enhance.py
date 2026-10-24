@@ -107,7 +107,11 @@ def enhance(frame: np.ndarray, mask: np.ndarray, p: Params) -> np.ndarray:
     e = y[..., None] + (e - y[..., None]) * (1.0 + 0.15 * s)  # saturation
     e = _shoulder(np.clip(e, 0, None))
 
-    blended = mc * e + (1.0 - mc) * oc
+    # Two-zone blend: the lift uses a tighter core (m^2.5) than the dimming (m), so the
+    # feathered edge shows the untouched original rather than lifted background — the
+    # edge reads as a soft pool of light instead of a bright cut-out ring.
+    core = mc ** 2.5
+    blended = (1.0 - mc) * oc + mc * ((1.0 - core) * lc + core * e)
 
     # ---- glow: bright subject pixels, blurred, added faintly -----------------
     # Glow only helps where the scene is dark; on a bright scene it reads as a halo.
