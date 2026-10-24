@@ -153,7 +153,13 @@ def spectral_saliency(frame: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
     sal = cv2.GaussianBlur(sal.astype(np.float32), (9, 9), 2.5)
     sal = cv2.resize(sal, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
     sal = (sal - sal.min()) / (sal.max() - sal.min() + 1e-6)
-    return sal > 0.45
+    binary = (sal > 0.45).astype(np.uint8)
+    # Keep only the strongest blob: scattered blobs make the effect look random.
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(binary)
+    if n <= 1:
+        return binary.astype(bool)
+    best = 1 + int(np.argmax([sal[labels == i].sum() for i in range(1, n)]))
+    return labels == best
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +178,8 @@ def run(working: Path, info: video_io.VideoInfo, progress: ProgressFn | None = N
     from ultralytics import YOLO
 
     device = device or pick_device()
-    model = YOLO(str(MODEL_PATH))
+    # Bundled weights if present; otherwise Ultralytics downloads them once (needs internet).
+    model = YOLO(str(MODEL_PATH) if MODEL_PATH.exists() else MODEL_PATH.name)
     names = model.names
 
     scale = min(1.0, MASK_LONG_SIDE / max(info.width, info.height))

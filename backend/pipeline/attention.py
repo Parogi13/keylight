@@ -24,7 +24,9 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .perceive import Perception
+from .perceive import Perception, SALIENT_ID
+
+SALIENT_WEIGHT = 0.5
 
 CLASS_PRIOR = {
     "person": 1.0,
@@ -175,32 +177,34 @@ def select_targets(p: Perception, semantic: dict[int, dict] | None = None,
 
     for lo, hi in p.shot_bounds():
         scores = _scores(p, lo, hi)
+        shot_sem = [f for f in sem_frames if lo <= f < hi]
         cur: int | None = None
         missing = 0
         challenger, chal_count = None, 0
         for t in range(lo, hi):
             s = scores[t - lo]
-            # Most recent semantic decision within this shot.
+            # Semantic preference: the most recent decision in this shot. Before the
+            # shot's first decision, use that first decision (we have lookahead), so
+            # the shot does not start on the heuristic subject and then swing over.
             sem = None
-            i = int(np.searchsorted(sem_frames, t, side="right") - 1)
-            if i >= 0 and sem_frames[i] >= lo:
-                sem = semantic[sem_frames[i]]
-            if sem and sem.get("target") is not None and sem["target"] in s:
-                if cur != sem["target"]:
-                    cur, challenger, chal_count = sem["target"], None, 0
-                missing = 0
-                raw[t], src[t], why[t] = cur, "semantic", sem.get("reason", "")
-                continue
+            if shot_sem:
+                i = int(np.searchsorted(shot_sem, t, side="right") - 1)
+                sem = semantic[shot_sem[max(i, 0)]]
+            pref = sem.get("target") if sem else None
 
             best = max(s, key=s.get) if s else None
-            if cur is None:
+            if pref is not None and pref in s:
+                if cur != pref:
+                    challenger, chal_count = None, 0
+                cur, missing = pref, 0
+            elif cur is None:
                 cur = best
                 missing = 0
             elif cur not in s:
-                missing += 1
+                missing += 1  # detector dropout: hold the current subject briefly
                 if missing > hold:
                     cur, missing = best, 0
-            else:
+            elif cur != pref:
                 missing = 0
                 if best is not None and best != cur and s[best] > 1.6 * s[cur]:
                     if challenger == best:
@@ -212,7 +216,12 @@ def select_targets(p: Perception, semantic: dict[int, dict] | None = None,
                 else:
                     challenger, chal_count = None, 0
             raw[t] = cur
-            src[t] = "heuristic" if cur is not None else "none"
+            if cur is None:
+                src[t] = "none"
+            elif pref is not None and cur == pref:
+                src[t], why[t] = "semantic", sem.get("reason", "")
+            else:
+                src[t] = "heuristic"
     return raw, src, why
 
 
@@ -236,6 +245,8 @@ def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | Non
             num = np.convolve(onehot, kernel, mode="same")
             den = np.convolve(np.ones(n), kernel, mode="same")  # truncate at cuts, no fade-from-black
             w = num / den
+            if oid == SALIENT_ID:
+                w = w * SALIENT_WEIGHT  # no real subject: stay gentle
             for k in np.nonzero(w > 1e-3)[0]:
                 weights[lo + k][oid] = float(w[k])
 
@@ -245,11 +256,13 @@ def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | Non
     cut_set = set(p.cuts)
     for t in range(len(p.frames)):
         cls = next((o.cls for o in p.frames[t] if o.id == raw[t]), None)
-        if (not segments or t in cut_set or segments[-1].target != raw[t] or segments[-1].source != src[t]):
+        if not segments or t in cut_set or segments[-1].target != raw[t]:
             segments.append(Segment(t, t + 1, raw[t], cls, src[t], why[t]))
         else:
             segments[-1].end = t + 1
             segments[-1].cls = segments[-1].cls or cls
+            if src[t] == "semantic":
+                segments[-1].source = "semantic"
             if why[t] and not segments[-1].reason:
                 segments[-1].reason = why[t]
 
