@@ -8,15 +8,20 @@ cd "$(dirname "$0")/.."
 source .venv/bin/activate
 
 if [ "${1:-}" = "--dev" ]; then
-  [ -x frontend/node_modules/.bin/vite ] || (cd frontend && npm install)
+  if [ ! -d frontend/node_modules ] || [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then
+    (cd frontend && npm install --no-audit --no-fund)
+  fi
   (cd backend && python main.py) &
   BACK=$!
   trap 'kill $BACK' EXIT
   cd frontend && npm run dev
 else
   # Always rebuild the UI (a few seconds) so a `git pull` never leaves an old
-  # interface running against a new backend. Install dependencies if missing.
-  [ -x frontend/node_modules/.bin/tsc ] || (cd frontend && npm install)
+  # interface running against a new backend. Re-install UI packages whenever the
+  # lockfile is newer than the last install (e.g. a pull added a dependency).
+  if [ ! -d frontend/node_modules ] || [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then
+    (cd frontend && npm install --no-audit --no-fund)
+  fi
   (cd frontend && npm run build)
   echo "Starting Keylight (first start can take ~20 s while PyTorch loads)…"
   # Open the browser only once the server answers, not after a fixed delay.
