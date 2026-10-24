@@ -4,9 +4,8 @@ Latency design
 - Frames are enhanced on a small thread pool (OpenCV/NumPy release the GIL), with
   a bounded in-flight window so memory stays flat regardless of video length.
   Output order is preserved; ffmpeg encoders run as separate processes.
-- `original.mp4` is a stream copy of the working copy (no re-encode). It is the
-  same frames at equal-or-better quality than the enhanced encode, so the
-  comparison can only flatter the original, never us.
+- `original.mp4` is re-encoded from the same decoded frames with the same encoder
+  settings as `enhanced.mp4`, so unchanged regions are identical in both.
 - The attention view is a debug overlay, so it is rendered at ≤960 px; the player
   scales it into the same box.
 """
@@ -57,12 +56,11 @@ def render(working: Path, info: video_io.VideoInfo, att: Attention, params: Para
     audio = working if info.has_audio else None
 
     p = att.p
-    # Stream-copy the original only if the container's frame count matches what
-    # actually decoded (a damaged file can list frames that don't decode). Otherwise
-    # re-encode it from the same decoded frames so all outputs stay frame-aligned.
-    copy_original = write_original and len(p.frames) == info.frame_count
-    if copy_original:
-        publish_original(working, out_dir / "original.mp4")
+    # Fair comparison: the original is re-encoded from the *same decoded frames* with
+    # the *same encoder settings* as the enhanced video. Wherever Keylight changes
+    # nothing, both files are identical; any visible difference is our effect, not
+    # one side having been compressed one more time than the other.
+    copy_original = False
 
     enc = video_io.FrameWriter(out_dir / "enhanced.mp4.part", W, H, fr, audio)
     orig = (video_io.FrameWriter(out_dir / "original.mp4.part", W, H, fr, audio)

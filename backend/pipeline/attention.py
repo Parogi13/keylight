@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .perceive import Perception, SALIENT_ID
+from .perceive import SALIENCY_FALLBACK, SALIENT_ID, Perception
 
 SALIENT_WEIGHT = 0.5
 
@@ -231,6 +231,10 @@ def select_targets(p: Perception, semantic: dict[int, dict] | None = None,
 # ---------------------------------------------------------------------------
 def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | None = None,
           feather: float = 0.025) -> Attention:
+    if not SALIENCY_FALLBACK:
+        # Perception caches from older runs may still contain saliency blobs; with
+        # the fallback off they must never be highlighted (no subject = untouched).
+        p.frames = [[o for o in objs if o.id != SALIENT_ID] for objs in p.frames]
     raw, src, why = select_targets(p, semantic)
 
     # Half-window of 0.15 s .. 1.0 s. Lookahead never exceeds one second.
