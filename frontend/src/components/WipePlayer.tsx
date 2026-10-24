@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Segment } from '../api'
 
 export type CompareMode = 'wipe' | 'original' | 'enhanced'
@@ -60,7 +60,8 @@ export default function WipePlayer({ original, enhanced, attention, showAttentio
           } else {
             f.playbackRate = m.playbackRate * (1 - Math.max(-0.08, Math.min(0.08, d * 2)))
           }
-          if (m.paused !== f.paused) (m.paused ? f.pause() : f.play().catch(() => {}))
+          if (m.paused && !f.paused) f.pause()
+          else if (!m.paused && f.paused) f.play().catch(() => {})
         }
       }
       raf = requestAnimationFrame(loop)
@@ -191,8 +192,15 @@ function Timeline({ duration, time, segments, cuts, onSeek }: {
     return Math.max(0, Math.min(1, (x - r.left) / r.width)) * duration
   }
   // Alternate shading per distinct target so focus changes are visible on the bar.
-  let shade = 0
-  let prev: string | null = null
+  const shades = useMemo(() => {
+    let shade = 0
+    let prev: string | null = null
+    return segments.map((s) => {
+      const key = `${s.target}-${s.cls}`
+      if (key !== prev) { shade = (shade + 1) % 2; prev = key }
+      return shade
+    })
+  }, [segments])
   return (
     <div
       ref={ref}
@@ -212,11 +220,9 @@ function Timeline({ duration, time, segments, cuts, onSeek }: {
       }}
     >
       {segments.map((s, i) => {
-        const key = `${s.target}-${s.cls}`
-        if (key !== prev) { shade = (shade + 1) % 2; prev = key }
         return (
           <div key={i}
-            className={`seg ${s.target == null ? 'seg-none' : shade ? 'seg-a' : 'seg-b'} ${s.source === 'semantic' ? 'seg-ai' : ''}`}
+            className={`seg ${s.target == null ? 'seg-none' : shades[i] ? 'seg-a' : 'seg-b'} ${s.source === 'semantic' ? 'seg-ai' : ''}`}
             style={{ left: `${(s.t0 / duration) * 100}%`, width: `${((s.t1 - s.t0) / duration) * 100}%` }}
             title={s.target == null ? 'No subject' : `${s.cls}${s.source === 'semantic' ? ' (Claude)' : ''}`} />
         )

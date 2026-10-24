@@ -27,7 +27,7 @@ import numpy as np
 from . import video_io
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "yolo11n-seg.pt"
-MASK_LONG_SIDE = 320
+MASK_LONG_SIDE = 480
 SALIENT_ID = -1
 
 ProgressFn = Callable[[str, float], None]

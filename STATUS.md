@@ -21,10 +21,13 @@
 | Frontend: drop zone, progress, wipe player, Original/Keylight flip, attention view, focus timeline, adjust and re-render | Verified in headless Chromium: all three videos load, followers stay within ~5 ms of the master |
 | Claude semantic layer (set-of-mark keyframes, ID validation, fallback) | Logic verified with a **fake** client, including network errors and made-up IDs |
 | Fresh clone → build → prerender | Verified |
+| Edge cases (second pass) | Verified end to end: HDR/HLG 10-bit HEVC (tone-mapped), rotated phone video, variable frame rate, 60 fps, AC3 and MP3 audio, 1-frame odd-size video, truncated file, garbage file and audio-only file (friendly errors), shots shorter than the smoothing window |
+| Claude failure modes | Verified with fakes: unreachable API stops after one probe (~2 s, no stall); slow API is cut off by a 60 s budget; bad IDs rejected; UI notes when Claude wasn't used |
 
 ## Untested (needs your Mac or key)
 
-- **MPS acceleration.** If MPS errors on some op, `perceive.py` automatically retries that video on CPU. Speed on your Mac is unknown. Here, on 2 slow CPU cores, a 1080p clip takes about 13× its length.
+- **MPS acceleration.** If MPS errors on some op, `perceive.py` automatically retries that video on CPU. Speed on your Mac is unknown. Here, on 2 slow CPU cores, a 1080p clip now takes about 7× its length (13× before the latency pass). On a Mac, rendering also spreads across cores (up to 6 threads).
+- **Real iPhone HDR footage.** The HDR path was tested on a synthetic HLG clip. If real iPhone clips look too dark or flat, re-export them as SDR or tell me.
 - **Live Claude calls.** The model ID defaults to `claude-sonnet-5-5` (`KEYLIGHT_CLAUDE_MODEL` in `.env`). If calls fail, the "How this was made" panel shows "On this computer" and `metadata.json` → `semantic.error` has the reason. Nothing breaks, because it falls back to the heuristic.
 - Real playback on an HDR/XDR screen and Safari. I tested Chromium only, so check Safari before judging.
 
@@ -44,12 +47,25 @@
 
 Keys: Space plays, W wipe, F flips between versions, A attention, `,` / `.` step one frame.
 
-## Known limitations and next steps if time allows
+## Latency and memory (second pass)
+
+| Stage | Change | Effect here |
+|---|---|---|
+| Prepare | Constant-frame-rate H.264 inputs are stream-copied instead of transcoded; others use `superfast` | 0.25 s instead of several seconds for typical stock clips |
+| Perceive | YOLO loaded once per process; detector runs at ~30 Hz (every 2nd frame on 60 fps video), interpolating in between | 60 fps video perceives in half the time; mask IoU vs every-frame detection 0.92 |
+| Render | uint8 background path, mask upsampled only around the subject, LUT shadow lift, in-place math, threaded frame pool, original stream-copied, attention view at ≤960 px | night-drive render 38 s → 8 s |
+| Claude | One probe call, then parallel calls under a 60 s budget | Wi-Fi outage costs ~2 s, not minutes |
+| Player | Hidden overlay paused; transport redraws at 15 Hz | Browser decodes 2 videos instead of 3 |
+| Memory | Bounded per-render mask cache; frames in flight capped at 2× threads; upload deleted after the working copy is made | Peak RSS ~1.1 GB on a 70 s clip, flat across length (mostly PyTorch itself) |
+
+To make it faster: `KEYLIGHT_DETECT_STRIDE=2` runs YOLO on every 2nd frame for any video. To use a specific number of render threads: `KEYLIGHT_RENDER_THREADS=N`.
+
+## Known limitations and next steps
 
 - The subject heuristic favors large, central, persistent, person-like objects. In a crowd it picks one arbitrarily, and that's exactly where Claude or a focus instruction helps.
-- Masks are computed at about 320 px on the long side. Tiny subjects get coarse edges, which feathering hides.
-- No Tauri packaging (deliberately skipped).
-- Possible speed-up if needed: run the detector every 2nd frame. That's not implemented, so ask if the Mac is too slow.
+- In bright daylight scenes, the undimmed area around the subject can read as a faint light pool. That's intended for night scenes; turn down "Background dimming" for daylight clips.
+- Only YOLO's 80 everyday classes are recognized; anything else falls back to a gentle saliency highlight.
+- Not built: live streaming playback (the pipeline is 1-second-lookahead compatible, but runs per file), Tauri packaging, multiple simultaneous subjects.
 
 ## Where things are
 
