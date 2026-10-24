@@ -64,6 +64,10 @@ export default function Result({ jobId, health, onBack }: Props) {
   if (!res || !draft) return <div className="processing"><p className="proc-file">Loading…</p></div>
 
   const m = res.metadata
+  // Auto HDR: play the BT.2020/PQ pair whenever it exists and this browser can decode
+  // 10-bit HEVC (Safari/Chrome on Apple Silicon). Both sides of the wipe switch
+  // together, so the comparison stays fair. Add ?sdr to the URL to force SDR.
+  const hdr = !!(res.original_hdr && res.enhanced_hdr) && canPlayHdr() && !location.search.includes('sdr')
   const claude = health?.claude_available ?? false
   const dirty = (['strength', 'background', 'smoothing', 'focus'] as const).some((k) => draft[k] !== res.settings[k])
   const total = Object.values(m.timings_s).reduce((a, b) => a + b, 0)
@@ -89,8 +93,8 @@ export default function Result({ jobId, health, onBack }: Props) {
       </div>
 
       <WipePlayer
-        original={res.original}
-        enhanced={res.enhanced}
+        original={hdr ? res.original_hdr! : res.original}
+        enhanced={hdr ? res.enhanced_hdr! : res.enhanced}
         attention={res.attention}
         showAttention={showAttention}
         mode={mode}
@@ -139,6 +143,7 @@ export default function Result({ jobId, health, onBack }: Props) {
             <div><dt>Scenes</dt><dd>{m.shots}</dd></div>
             <div><dt>Subjects followed</dt><dd>{following}</dd></div>
             <div><dt>Subject choice</dt><dd>{m.semantic?.enabled && m.semantic.ok ? `Claude (${m.semantic.ok} still frames sent)` : 'On this computer'}</dd></div>
+            <div><dt>Playing</dt><dd>{hdr ? 'HDR (subject above SDR white)' : 'SDR'}</dd></div>
             <div><dt>Video</dt><dd>{m.video.width}×{m.video.height}, {m.video.fps.toFixed(2).replace(/\.00$/, '')} fps{m.video.has_audio ? ', with sound' : ''}</dd></div>
           </dl>
           {m.semantic?.enabled && m.semantic.error && (
@@ -151,3 +156,11 @@ export default function Result({ jobId, health, onBack }: Props) {
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
+
+function canPlayHdr(): boolean {
+  try {
+    return document.createElement('video').canPlayType('video/mp4; codecs="hvc1.2.4.L123.B0"') !== ''
+  } catch {
+    return false
+  }
+}

@@ -44,7 +44,10 @@ export type Metadata = {
   realtime_factor: number
 }
 
-export type Result = Job & { original: string; enhanced: string; attention: string; metadata: Metadata }
+export type Result = Job & {
+  original: string; enhanced: string; attention: string; metadata: Metadata
+  original_hdr: string | null; enhanced_hdr: string | null  // BT.2020/PQ pair, when rendered
+}
 
 export type Health = { ok: boolean; device: string; claude_available: boolean; claude_model: string; defaults: Settings }
 
