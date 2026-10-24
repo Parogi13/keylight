@@ -12,3 +12,6 @@ samples/*.mp4
 .venv
 backend/calibration/
 
+.venv-sam2/
+bench/
+backend/models/*.pt

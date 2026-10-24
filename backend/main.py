@@ -53,7 +53,10 @@ jobs = JobManager(OUTPUTS)
 _DEVICE = perceive.pick_device()
 
 DEFAULT_SETTINGS = {"strength": 0.6, "background": 0.15, "glow": 0.35, "smoothing": 0.6, "hdr": True,
-                    "focus": "", "use_claude": True}
+                    "focus": "", "use_claude": True,
+                    # experiment/sam2-metal: "yolo" (default) or "sam2"
+                    "segmentation_backend": os.environ.get("KEYLIGHT_SEGMENTATION", "yolo"),
+                    "yolo_interval_s": 1.0}
 
 
 def _settings(raw: str | dict | None) -> dict:

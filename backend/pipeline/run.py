@@ -84,6 +84,22 @@ def _finish(job: Path, info, p, att, params, settings, timings, sem_stats, rende
     return meta
 
 
+def _perceive(job: Path, info, settings: dict, report) -> "perceive.Perception":
+    """segmentation_backend: 'yolo' (default, YOLO11n-seg + ByteTrack every frame) or
+    'sam2' (experimental: YOLO keyframes ~1/s + SAM 2 mask propagation). Falls back
+    to YOLO if SAM 2 isn't installed."""
+    backend = str(settings.get("segmentation_backend", "yolo")).lower()
+    if backend == "sam2":
+        from . import sam2_perceive
+        if sam2_perceive.available():
+            stats: dict = {}
+            p = sam2_perceive.run(job / "working.mp4", info, progress=report,
+                                  yolo_interval_s=float(settings.get("yolo_interval_s", 1.0)), stats=stats)
+            (job / "sam2_stats.json").write_text(json.dumps(stats, indent=2))
+            return p
+    return perceive.run(job / "working.mp4", info, progress=report)
+
+
 def process(job: Path, src: Path, settings: dict, cb: Progress | None = None) -> dict:
     report = _tracker(WEIGHTS_FULL, cb)
     timings = {}
@@ -95,7 +111,7 @@ def process(job: Path, src: Path, settings: dict, cb: Progress | None = None) ->
         src.unlink(missing_ok=True)  # the working copy replaces the upload: halve disk use
 
     t = time.time()
-    p = perceive.run(job / "working.mp4", info, progress=report)
+    p = _perceive(job, info, settings, report)
     p.save(job)
     timings["perceive"] = time.time() - t
 
