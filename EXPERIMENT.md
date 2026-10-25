@@ -77,14 +77,13 @@ under OFL). Double-click a name to play it; the pencil or right-click renames it
 a Delete / Keep confirm. Cmd+L library, Cmd+W close, Cmd+Q quit.
 
 Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
-C calibration, Up/Down subject brightness, S whole-frame saturation (on by default
-at 1.1x; `--saturation 1` starts with it off), [ / ] less / more saturation.
+C calibration, Up/Down subject brightness, S whole-frame saturation (off by default;
+S turns it on at 1.1x, `--saturation 1.1` starts with it on), [ / ] less / more saturation.
 
 Whole-frame saturation pushes chroma in linear Display P3 and stops at the P3 gamut edge
 (hue and luminance preserved), so colours can go past sRGB on the XDR panel. It is the one
-mode that touches the background; it is on by default for a richer look, S turns it off
-for the strict "background untouched" comparison, and the wipe's left side always stays
-the untouched original.
+mode that touches the background, so it is off by default: out of the box only the subject
+changes. The wipe's left side always stays the untouched original.
 
 ## Results so far (cloud CPU, 2 cores: **not** representative of the M3 Pro)
 

@@ -4,7 +4,7 @@
 //   swift run -c release KeylightPlayer --calibration
 //   swift run -c release KeylightPlayer --image still.png --mask still_mask.png
 //   swift run -c release KeylightPlayer <job>/native          (video.mp4 + masks.json)
-//   whole-frame saturation starts on at 1.1x; --saturation 1 starts with it off
+//   whole-frame saturation starts off (background untouched); --saturation 1.1 starts it on
 //
 // Library: double-click a video to open it; the trash bin moves it to the macOS Trash.
 // Keys: Space play/pause · W wipe · E enhanced · O original · A attention · C calibration

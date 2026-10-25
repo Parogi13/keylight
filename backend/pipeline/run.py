@@ -17,6 +17,7 @@ cost one render pass rather than a full re-analysis.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -140,5 +141,15 @@ def _decide_and_render(job, info, p, settings, report, timings, write_original) 
                                  progress=report, write_original=write_original or not (job / "original.mp4").exists())
     timings["render"] = time.time() - t
 
-    report("finalize", 0.5)
-    return _finish(job, info, p, att, params, settings, timings, sem_stats, render_stats)
+    report("finalize", 0.3)
+    meta = _finish(job, info, p, att, params, settings, timings, sem_stats, render_stats)
+    # Native Metal player export (same attention, including Claude's choice). Best effort:
+    # a failure here never fails the web job. KEYLIGHT_NATIVE_EXPORT=0 turns it off.
+    if os.environ.get("KEYLIGHT_NATIVE_EXPORT", "1") != "0":
+        try:
+            from . import native_export
+            native_export.export(job, att=att, p=p)
+        except Exception as e:  # noqa: BLE001
+            print(f"[keylight] native export skipped: {e}")
+    report("finalize", 0.9)
+    return meta
