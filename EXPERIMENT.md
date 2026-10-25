@@ -108,6 +108,12 @@ title bar; headroom rises as display brightness drops. With SAM 2 masks the car 
 SDR white, the background matches the original, audio stays in sync, and the still test
 is aligned, upright and correctly coloured.
 
+No-subject clips (`beach`, aerial coastline, 187 frames; `mountain`, portrait landscape,
+473 frames, both 4K scaled to 1080p): neither backend finds a subject (0 frames), SAM 2 has
+nothing to propagate (YOLO 6.2 s / 16.8 s, SAM 2 path 7.8 s / 21.1 s). In the Metal player
+both play untouched (Keylight == Original); portrait plays upright and pillarboxed with audio
+in sync. They only exercise the fallback; night-drive is still the only A-vs-B comparison.
+
 ## Status
 
 | Stage | State |
