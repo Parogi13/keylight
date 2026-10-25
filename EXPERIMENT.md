@@ -137,6 +137,19 @@ Both play correctly in the Metal player. Cost: SAM 2 runs on every frame (60 fps
 on every tracked object, so it is ~2 s/frame. Next speed-ups: run SAM 2 at a frame stride
 (e.g. 15 fps effective) and track only the followed subject.
 
+Speed-ups (now the defaults): SAM 2 runs at ~15 Hz (stride 4 at 60 fps; skipped frames get
+the nearest SAM mask shifted by box motion) on up to 3 objects ranked like the attention
+heuristic, with a drift guard. Tracking only the subject was tried and rejected: at stride
+4 the walker's mask intermittently leaked 20x onto a parked car; tracked neighbours stop it.
+
+| Full clip, 689 frames | YOLO | SAM 2, stride 4, 3 objects |
+|---|---|---|
+| Time / FPS | **19.3 s / 35.7 fps** | 336 s / 2.05 fps (was 0.52 fps) |
+| Peak memory | **767 MB** | 1,177 MB |
+| Stability (mean / p5) | 0.979 / **0.940** | **0.980** / 0.928 |
+| Edge alignment | 2.15 | **3.27** |
+| A vs B subject IoU | 0.913 | |
+
 Known issue (also on main): Homebrew ffmpeg 9 has no `zscale`, so `normalize()` falls back
 to plain scaling for HLG/PQ input. The working copy is not tone-mapped and keeps its HLG tag.
 
