@@ -69,6 +69,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var lastMaskIndex = -1
     var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
+    private var loopObserver: NSObjectProtocol?
     private(set) var videoSize = CGSize(width: 16, height: 9)
 
     // Stats (shown in the HUD)
@@ -135,12 +136,22 @@ final class Renderer: NSObject, MTKViewDelegate {
         videoOutput = out
         let p = AVPlayer(playerItem: item)
         p.actionAtItemEnd = .none
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
-            p.seek(to: .zero)
-            p.play()
+        loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak p] _ in
+            p?.seek(to: .zero)
+            p?.play()
         }
         player = p   // AVPlayer is the clock; audio plays natively and stays in sync.
         p.play()
+    }
+
+    /// Window closed: silence the audio and let AVFoundation release the file.
+    func stop() {
+        if let o = loopObserver { NotificationCenter.default.removeObserver(o) }
+        loopObserver = nil
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        videoOutput = nil
     }
 
     /// Pull the frame AVPlayer wants on screen right now (if new) and its mask.

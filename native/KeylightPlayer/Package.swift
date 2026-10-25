@@ -7,6 +7,7 @@ let package = Package(
     name: "KeylightPlayer",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "KeylightPlayer", path: "Sources/KeylightPlayer")
+        .executableTarget(name: "KeylightPlayer", path: "Sources/KeylightPlayer",
+                          resources: [.copy("Fonts")])  // IBM Plex Serif (OFL), registered at launch
     ]
 )

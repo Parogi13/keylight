@@ -69,6 +69,13 @@ swift run -c release KeylightPlayer --image ../../backend/outputs/<job_id>/nativ
                                     --mask  ../../backend/outputs/<job_id>/native/still_mask.png
 ```
 
+Library (main menu): `swift run -c release KeylightPlayer` with no arguments opens it. It
+lists every video with a native export (`backend/outputs/<job>/native`, `bench/<clip>/<backend>/native`),
+in the web app's look (lamp logo, glowing wordmark, Carbon Black, IBM Plex Serif bundled
+under OFL). Double-click a name to play it; the pencil or right-click renames it in place
+(stored in `native/library.json`); the trash bin moves its folder to the macOS Trash after
+a Delete / Keep confirm. Cmd+L library, Cmd+W close, Cmd+Q quit.
+
 Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
 C calibration, Up/Down subject brightness, S whole-frame saturation (on by default
 at 1.1x; `--saturation 1` starts with it off), [ / ] less / more saturation.
