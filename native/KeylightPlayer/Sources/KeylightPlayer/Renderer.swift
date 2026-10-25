@@ -59,7 +59,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     var wipeOn = false
     /// Whole-frame saturation, on by default (S toggles, [ / ] adjust). Off = untouched background.
     var saturationOn = true
-    var saturationAmount: Float = 1.35
+    var saturationAmount: Float = 1.1
 
     // Sources
     private(set) var frameTexture: MTLTexture?

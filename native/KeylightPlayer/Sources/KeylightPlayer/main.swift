@@ -3,7 +3,7 @@
 //   swift run -c release KeylightPlayer --calibration
 //   swift run -c release KeylightPlayer --image still.png --mask still_mask.png
 //   swift run -c release KeylightPlayer <job>/native          (video.mp4 + masks.json)
-//   whole-frame saturation starts on at 1.35x; --saturation 1 starts with it off
+//   whole-frame saturation starts on at 1.1x; --saturation 1 starts with it off
 //
 // Keys: Space play/pause · W wipe · E enhanced · O original · A attention · C calibration
 //       Up/Down change subject brightness · drag in the video to move the wipe
@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let v = args[i + 1]; args.removeSubrange(i...i + 1); return v
         }
         if let sat = take("--saturation") {
-            guard let v = Float(sat), v >= 1 else { fatal("--saturation needs a number >= 1, e.g. 1.35") }
+            guard let v = Float(sat), v >= 1 else { fatal("--saturation needs a number >= 1, e.g. 1.1") }
             renderer.saturationAmount = min(v, 2)
             renderer.saturationOn = v > 1
         }

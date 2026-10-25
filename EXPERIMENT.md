@@ -71,7 +71,7 @@ swift run -c release KeylightPlayer --image ../../backend/outputs/<job_id>/nativ
 
 Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
 C calibration, Up/Down subject brightness, S whole-frame saturation (on by default
-at 1.35x; `--saturation 1` starts with it off), [ / ] less / more saturation.
+at 1.1x; `--saturation 1` starts with it off), [ / ] less / more saturation.
 
 Whole-frame saturation pushes chroma in linear Display P3 and stops at the P3 gamut edge
 (hue and luminance preserved), so colours can go past sRGB on the XDR panel. It is the one
