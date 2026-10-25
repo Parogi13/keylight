@@ -28,8 +28,12 @@ from pipeline import attention, perceive, video_io  # noqa: E402
 def main(job: Path, still_at: float | None = None) -> int:
     out = job / "native"
     out.mkdir(exist_ok=True)
-    meta = json.loads((job / "metadata.json").read_text())
+    meta_path = job / "metadata.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     smoothing = float(meta.get("settings", {}).get("smoothing", 0.6))
+    # Works on web-app jobs and on benchmark folders (bench/<clip>/<backend>, whose
+    # working copy sits one level up).
+    working = job / "working.mp4" if (job / "working.mp4").exists() else job.parent / "working.mp4"
     p = perceive.Perception.load(job)
     att = attention.build(p, smoothing=smoothing)
     n = len(p.frames)
@@ -38,7 +42,7 @@ def main(job: Path, still_at: float | None = None) -> int:
             f.write((np.clip(att.mask(t), 0, 1) * 255 + 0.5).astype(np.uint8).tobytes())
     (out / "masks.json").write_text(json.dumps({"width": p.mask_w, "height": p.mask_h, "count": n,
                                                 "fps": p.fps, "source": str(job.name)}))
-    src = job / "original.mp4"   # SDR original, BT.709-tagged; the player does the enhancement live
+    src = job / "original.mp4" if (job / "original.mp4").exists() else working  # SDR original; enhancement happens live
     dst = out / "video.mp4"
     if dst.exists():
         dst.unlink()
@@ -49,7 +53,7 @@ def main(job: Path, still_at: float | None = None) -> int:
     # A still frame + its full-resolution mask for the static EDR test (Stage 5).
     covs = [float(att.mask(t).mean()) for t in range(n)]
     t_still = int(round(still_at * p.fps)) if still_at is not None else int(np.argmax(covs))
-    for t, frame in enumerate(video_io.iter_frames(job / "working.mp4")):
+    for t, frame in enumerate(video_io.iter_frames(working)):
         if t == t_still:
             cv2.imwrite(str(out / "still.png"), frame)
             m = cv2.resize(att.mask(t), (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
