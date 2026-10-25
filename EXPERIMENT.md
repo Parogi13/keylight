@@ -121,6 +121,25 @@ nothing to propagate (YOLO 6.2 s / 16.8 s, SAM 2 path 7.8 s / 21.1 s). In the Me
 both play untouched (Keylight == Original); portrait plays upright and pillarboxed with audio
 in sync. They only exercise the fallback; night-drive is still the only A-vs-B comparison.
 
+Person walking (first 5 s of an iPhone-style clip: 4K portrait, 60 fps, HLG; 302 frames
+at 1080x1920):
+
+| | A: YOLO | B: YOLO + SAM 2.1 Tiny |
+|---|---|---|
+| Time / FPS | **10.8 s / 27.9 fps** | 575 s / 0.52 fps (3 objects tracked) |
+| Peak memory | **725 MB** | 1,326 MB |
+| Stability (mean / p5) | 0.979 / 0.945 | **0.982 / 0.972** |
+| Edge alignment | 1.78 | **3.14** |
+| A vs B subject IoU | 0.903 | |
+
+Visual check agrees: SAM 2 hugs the walker and is steadier; YOLO's mask is a loose blob.
+Both play correctly in the Metal player. Cost: SAM 2 runs on every frame (60 fps here) and
+on every tracked object, so it is ~2 s/frame. Next speed-ups: run SAM 2 at a frame stride
+(e.g. 15 fps effective) and track only the followed subject.
+
+Known issue (also on main): Homebrew ffmpeg 9 has no `zscale`, so `normalize()` falls back
+to plain scaling for HLG/PQ input. The working copy is not tone-mapped and keeps its HLG tag.
+
 ## Status
 
 | Stage | State |
