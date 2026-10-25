@@ -6,8 +6,6 @@
 // video's folder to the macOS Trash (recoverable), after an inline Delete / Keep confirm.
 // The pencil (or right-click > Rename) edits the name in place; a custom name is stored in
 // native/library.json next to the video, so folders and the web app's job IDs never change.
-// "Add video" picks a file on this Mac and hands it to the local engine (Engine.swift); the
-// finished video appears in the list by itself.
 import AppKit
 import UniformTypeIdentifiers
 
@@ -41,15 +39,25 @@ enum Library {
         for job in subfolders(outputs) {
             let info = (try? JSONSerialization.jsonObject(with: Data(contentsOf: job.appendingPathComponent("job.json")))) as? [String: Any]
             let name = (info?["name"] as? String) ?? job.lastPathComponent
-            if let item = item(title: prettify(name), tag: nil, folder: job) { items.append(item) }
+            let backend = ((info?["settings"] as? [String: Any])?["segmentation_backend"] as? String) ?? "yolo"
+            if let item = item(title: prettify(name), tag: tag(for: backend), folder: job) { items.append(item) }
         }
         for clip in subfolders(root.appendingPathComponent("bench")) {
             for backend in subfolders(clip) {
-                let tag = backend.lastPathComponent == "sam2" ? "SAM 2" : backend.lastPathComponent == "yolo" ? "YOLO" : backend.lastPathComponent
-                if let item = item(title: prettify(clip.lastPathComponent), tag: tag, folder: backend) { items.append(item) }
+                if let item = item(title: prettify(clip.lastPathComponent), tag: tag(for: backend.lastPathComponent),
+                                   folder: backend) { items.append(item) }
             }
         }
         return items.sorted { $0.modified > $1.modified }
+    }
+
+    /// Which segmentation made the masks: job.json settings for web jobs, the folder name for bench.
+    private static func tag(for backend: String) -> String {
+        switch backend.lowercased() {
+        case "sam2": return "SAM 2"
+        case "yolo": return "YOLO"
+        default: return backend
+        }
     }
 
     private static func item(title: String, tag: String?, folder: URL) -> LibraryItem? {
@@ -110,12 +118,13 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
     var onDelete: ((LibraryItem) throws -> Void)?
     var onRename: ((LibraryItem, String) throws -> Void)?
 
+    let processor = Processor()
     private let list = NSStackView()
     private let scroll = NSScrollView()
+    private var processingRows: [UUID: ProcessingRow] = [:]
+    private let precise = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private static let preciseKey = "KeylightPreciseMasks"
     private let empty = NSTextField(wrappingLabelWithString: "")
-    private let status = Theme.label("", size: 15, color: Theme.key)
-    private var addButton: PillButton?
-    private var importing = false
 
     override init() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 640),
@@ -131,12 +140,14 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         build()
         window.center()
+        processor.onListChange = { [weak self] in self?.reload() }
+        processor.onProgress = { [weak self] task in self?.processingRows[task.id]?.update(task) }
+        processor.onFinished = { [weak self] in self?.reload() }
     }
 
     private func build() {
-        let root = NSView()
-        root.wantsLayer = true
-        root.layer?.backgroundColor = Theme.night.cgColor
+        let root = DropView()
+        root.onDrop = { [weak self] urls in self?.addVideos(urls) }
         window.contentView = root
 
         // Top bar: lamp + glowing wordmark, calibration on the right.
@@ -146,20 +157,23 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         mark.heightAnchor.constraint(equalToConstant: 54).isActive = true
         let brand = NSStackView(views: [mark, Theme.wordmark()])
         brand.spacing = 12
-        let add = PillButton("Add video", style: .key, size: 14, target: self, action: #selector(addClicked))
-        add.setAccessibilityLabel("Add a video to enhance")
-        addButton = add
         let calibrate = PillButton("Calibrate display", style: .quiet, size: 14, target: self, action: #selector(calibrateClicked))
-        let bar = NSStackView(views: [brand, NSView(), add, calibrate])
+        let add = PillButton("Add video", style: .key, size: 15, target: self, action: #selector(addClicked))
+        let bar = NSStackView(views: [brand, NSView(), calibrate, add])
+        bar.spacing = 12
         bar.distribution = .fill
         bar.alignment = .centerY
-        bar.spacing = 12
 
-        let heading = Theme.label("Your videos", size: 20, weight: .semibold)
-        let hint = Theme.label("Add a video, or double-click one to open it in the Keylight player. Right-click or use the pencil to rename.",
+        let title = Theme.label("Your videos", size: 20, weight: .semibold)
+        precise.attributedTitle = NSAttributedString(string: "Precise masks (SAM 2, several minutes per clip)",
+                                                     attributes: [.font: Theme.serif(14), .foregroundColor: Theme.mist])
+        precise.state = UserDefaults.standard.bool(forKey: Self.preciseKey) ? .on : .off
+        precise.target = self
+        precise.action = #selector(preciseChanged)
+        let heading = NSStackView(views: [title, NSView(), precise])
+        heading.alignment = .firstBaseline
+        let hint = Theme.label("Add a video or drop one here. Double-click to play; right-click or the pencil to rename.",
                                size: 15, color: Theme.mist)
-        status.lineBreakMode = .byTruncatingTail
-        status.isHidden = true
 
         list.orientation = .vertical
         list.alignment = .leading
@@ -167,8 +181,7 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         list.translatesAutoresizingMaskIntoConstraints = false
         empty.font = Theme.serif(16)
         empty.textColor = Theme.mist
-        empty.stringValue = "No videos yet. Click Add video to enhance one. The Keylight engine must be running "
-            + "(./scripts/start.sh); videos you process in the web app appear here too."
+        empty.stringValue = "No videos yet. Click Add video, or drop a clip onto this window."
 
         let doc = FlippedView()
         doc.translatesAutoresizingMaskIntoConstraints = false
@@ -181,7 +194,7 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         scroll.autohidesScrollers = true
         scroll.documentView = doc
 
-        for v in [bar, heading, hint, status, scroll] as [NSView] {
+        for v in [bar, heading, hint, scroll] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
@@ -192,12 +205,10 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
             bar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -g),
             heading.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 36),
             heading.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: g),
+            heading.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -g),
             hint.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 4),
             hint.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: g),
-            status.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 8),
-            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: g),
-            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -g),
-            scroll.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 12),
+            scroll.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 18),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: g),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -g),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -g),
@@ -218,8 +229,16 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
 
     func reload() {
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        processingRows = [:]
+        for task in processor.tasks {                     // videos being processed come first
+            let row = ProcessingRow(task: task)
+            row.onCancel = { [weak self] in self?.processor.cancel($0) }
+            processingRows[task.id] = row
+            list.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        }
         let items = Library.scan()
-        if items.isEmpty {
+        if items.isEmpty && processor.tasks.isEmpty {
             list.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
             return
@@ -247,30 +266,30 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
 
     @objc private func calibrateClicked() { onCalibrate?() }
 
-    // MARK: Add video (local file -> local engine -> native export -> this list)
-
     @objc private func addClicked() {
-        guard !importing else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie]
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.prompt = "Choose"
-        panel.message = "Choose a video to enhance. It stays on this Mac."
-        guard panel.runModal() == .OK, let file = panel.url else { return }
-        guard let focus = askFocus() else { return }
-        importing = true
-        addButton?.isEnabled = false
-        setStatus("Sending \(file.lastPathComponent) to the Keylight engine…")
-        Task { [weak self] in await self?.process(file: file, focus: focus) }
+        panel.allowedContentTypes = videoExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.message = "Choose videos to enhance"
+        panel.beginSheetModal(for: window) { [weak self] r in
+            if r == .OK { self?.addVideos(panel.urls) }
+        }
     }
 
-    /// Optional focus instruction for Claude; nil if the user cancels.
-    private func askFocus() -> String? {
+    private func addVideos(_ urls: [URL]) {
+        let videos = urls.filter { videoExtensions.contains($0.pathExtension.lowercased()) }
+        guard !videos.isEmpty, let focus = askFocus(count: videos.count) else { return }
+        processor.add(videos, precise: precise.state == .on, focus: focus)
+    }
+
+    /// Optional focus instruction for Claude, once per batch; nil if the user cancels.
+    private func askFocus(count: Int) -> String? {
         let alert = NSAlert()
         alert.messageText = "What should Keylight follow?"
         alert.informativeText = "Optional, for example \"the cyclist in red\". If Claude is set up, it picks the "
-            + "matching subject while the video is processed. Leave it empty to let Keylight choose."
+            + "matching subject while the video is processed. Leave it empty to let Keylight choose"
+            + (count > 1 ? " (applies to all \(count) videos)." : ".")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
         field.placeholderString = "Leave empty to let Keylight choose"
         alert.accessoryView = field
@@ -281,40 +300,8 @@ final class LibraryWindowController: NSObject, NSWindowDelegate {
         return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func process(file: URL, focus: String) async {
-        defer {
-            importing = false
-            addButton?.isEnabled = true
-        }
-        let name = Library.prettify(file.lastPathComponent)
-        do {
-            let id = try await Engine.submit(file, focus: focus)
-            while true {
-                try await Task.sleep(nanoseconds: 700_000_000)
-                let s = try await Engine.status(id)
-                switch s.state {
-                case "complete":
-                    setStatus("\(name) is ready. Double-click it to play.")
-                    reload()
-                    return
-                case "error":
-                    setStatus("Couldn't enhance \(name): \(s.error ?? "unknown error")", error: true)
-                    return
-                default:
-                    setStatus("\(name): \(s.label.isEmpty ? "Waiting" : s.label) · \(Int(s.progress * 100))%")
-                }
-            }
-        } catch let e as URLError where e.code == .cannotConnectToHost || e.code == .networkConnectionLost || e.code == .timedOut {
-            setStatus("The Keylight engine isn't running. Start it with ./scripts/start.sh, then add the video again.", error: true)
-        } catch {
-            setStatus("Couldn't enhance \(name): \(error)", error: true)
-        }
-    }
-
-    private func setStatus(_ text: String, error: Bool = false) {
-        status.stringValue = text
-        status.textColor = error ? Theme.ember : Theme.key
-        status.isHidden = false
+    @objc private func preciseChanged() {
+        UserDefaults.standard.set(precise.state == .on, forKey: Self.preciseKey)
     }
 }
 

@@ -35,7 +35,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     private let stats = Theme.label("", size: 13, color: Theme.mist)
     private let playButton = PillButton("Pause", style: .quiet, size: 14, target: nil, action: nil)
 
-    /// `saturation`: nil keeps the renderer default (off); a value above 1 starts it on at that amount.
+    /// `saturation`: nil keeps the renderer default (on, 1.1x); 1 turns it off.
     init(source: PlayerSource, title: String, saturation: Float? = nil) throws {
         self.source = source
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),

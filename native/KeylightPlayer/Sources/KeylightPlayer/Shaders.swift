@@ -19,7 +19,7 @@ struct Uniforms {
     int   mode;        // 0 enhanced, 1 original, 2 attention overlay, 3 calibration
     int   hasMask;
     float peakLimit;   // never exceed this multiple of SDR white
-    float saturation;  // whole-frame saturation multiple (1 = off, opt-in)
+    float saturation;  // whole-frame saturation multiple (1 = off)
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };

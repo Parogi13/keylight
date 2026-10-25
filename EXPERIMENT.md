@@ -75,10 +75,15 @@ in the web app's look (lamp logo, glowing wordmark, Carbon Black, IBM Plex Serif
 under OFL). Double-click a name to play it; the pencil or right-click renames it in place
 (stored in `native/library.json`); the trash bin moves its folder to the macOS Trash after
 a Delete / Keep confirm. Cmd+L library, Cmd+W close, Cmd+Q quit.
+**Add video** (or drop files on the window) runs `scripts/process_native.py`: the web app's
+pipeline plus the native export, in `.venv-sam2` (or `KEYLIGHT_PYTHON`), one video at a time
+with a progress row; YOLO by default, "Precise masks" for SAM 2, and an optional focus
+instruction for Claude asked once per batch. Jobs land in
+`backend/outputs/<id>/` like web uploads, so they appear in the web app too.
 
 Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
-C calibration, Up/Down subject brightness, S whole-frame saturation (off by default;
-S turns it on at 1.1x, `--saturation 1.1` starts with it on), [ / ] less / more saturation.
+C calibration, Up/Down subject brightness, S whole-frame saturation (on by default
+at 1.1x; S turns it off, `--saturation 1` starts with it off), [ / ] less / more saturation.
 
 Whole-frame saturation pushes chroma in linear Display P3 and stops at the P3 gamut edge
 (hue and luminance preserved), so colours can go past sRGB on the XDR panel. It is the one
@@ -170,7 +175,7 @@ to plain scaling for HLG/PQ input. The working copy is not tone-mapped and keeps
 | 5 Metal static EDR | done, verified on the M3 Pro |
 | 6 Metal video (AVPlayer clock, masks mmap'd) | done, verified (audio in sync) |
 | 7 SAM 2 masks in Metal | done; jobs now export native/ automatically, with Claude's subject choice |
-| 8 Interactive controls + library | done; "Add video" in the library (Oct 25, needs a Mac build check) |
+| 8 Interactive controls + library | done; "Add video" / drag-and-drop in the library, verified on the Mac (Oct 25) |
 | 9 Evaluation | numbers above; no user testing yet |
 
 ## Known risks

@@ -83,7 +83,7 @@ swift run -c release KeylightPlayer                 # library: Add video, open, 
 swift run -c release KeylightPlayer --calibration   # check your display's EDR headroom
 ```
 
-**Add video** sends a file on this Mac to the engine started by `start.sh`; when processing finishes, it appears in the library. Videos processed in the web app appear there too. Keys in the player: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention view, Up/Down subject brightness, S optional whole-frame saturation (off by default).
+**Add video** (or drag files onto the window) processes them on this Mac with the same pipeline as the web app, no server needed: a progress row per video, an optional focus instruction for Claude, and a "Precise masks" checkbox for SAM 2. Videos processed in the web app appear there too. Keys in the player: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention view, Up/Down subject brightness, S whole-frame saturation (on at a light 1.1x by default; S turns it off).
 
 Optional:
 - `ANTHROPIC_API_KEY=...` in `.env` turns on Claude subject choice and the "What should Keylight follow?" box.
