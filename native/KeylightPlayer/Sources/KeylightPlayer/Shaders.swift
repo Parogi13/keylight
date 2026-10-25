@@ -100,6 +100,7 @@ fragment float4 kl_fragment(VOut in [[stage_in]],
                             texture2d<float> mask  [[texture(1)]],
                             constant Uniforms& u   [[buffer(0)]]) {
     constexpr sampler s(filter::linear, address::clamp_to_edge);
+    constexpr sampler soft(filter::linear, mip_filter::linear, address::clamp_to_edge);
     if (u.mode == 3) return float4(calibration(in.uv, u.headroom), 1.0);
 
     float3 lin = to_linear(frame.sample(s, in.uv).rgb);
@@ -116,8 +117,17 @@ fragment float4 kl_fragment(VOut in [[stage_in]],
     // Two-zone blend, same as the Python renderer: the lift uses a tighter core
     // (m^2.5) so the feathered edge shows the original, not a bright cut-out ring.
     float core = m * m * sqrt(m);
-    float3 base = saturate_frame(lin, u.saturation);   // opt-in, whole frame
-    float3 out = mix(base, subject(base, u), core);
+    // Spill: like a real key light, a little of the light falls on the DARK ground around
+    // the subject (a blurred mip of the mask), so a lit person sits in the scene instead of
+    // reading as a cut-out. Gated by brightness: nothing above ~15% of SDR white gets any,
+    // so a bright sky behind a silhouette is never lifted (no halo).
+    float spill = 0.0;
+    if (u.hasMask) {
+        float ms = saturate(mask.sample(soft, in.uv, level(3.0)).r);
+        spill = 0.35 * ms * (1.0 - smoothstep(0.02, 0.15, dot(lin, LUMA709)));
+    }
+    float3 base = saturate_frame(lin, u.saturation);   // whole frame
+    float3 out = mix(base, subject(base, u), max(core, spill));
 
     if (u.wipe >= 0.0) {
         float dx = in.uv.x - u.wipe;

@@ -68,6 +68,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var maskTexture: MTLTexture?
     private var masks: MaskStore?
     private var lastMaskIndex = -1
+    private var maskNeedsMips = false
+    /// Shadow lift at full slider. The slider is the master control: 1.0x leaves the video
+    /// untouched and the lift ramps in with the brightness, reaching this at `fullGain`.
+    /// 0.35 rather than 0.6: lifting a backlit silhouette ~4x made it a flat grey cut-out.
+    var subjectStrength: Float = 0.35
+    static let fullGain: Float = 2.2
     var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var loopObserver: NSObjectProtocol?
@@ -99,7 +105,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     private func makeMaskTexture(width: Int, height: Int) -> MTLTexture? {
-        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: width, height: height, mipmapped: false)
+        // Mipmapped: the shader reads a blurred level for the light spill around the subject.
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: width, height: height, mipmapped: true)
         d.usage = .shaderRead
         d.storageMode = .shared
         return device.makeTexture(descriptor: d)
@@ -109,7 +116,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     func loadStill(image: URL, mask: URL?) throws {
         let loader = MTKTextureLoader(device: device)
-        let opts: [MTKTextureLoader.Option: Any] = [.SRGB: false,
+        let opts: [MTKTextureLoader.Option: Any] = [.SRGB: false, .allocateMipmaps: true, .generateMipmaps: true,
                                                     .textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue)]
         let tex = try loader.newTexture(URL: image, options: opts)
         frameTexture = tex
@@ -175,6 +182,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             if i != lastMaskIndex {
                 masks.upload(i, to: mtex)
                 lastMaskIndex = i
+                maskNeedsMips = true
             }
         }
     }
@@ -203,6 +211,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer() else { return }
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        if maskNeedsMips, let mt = maskTexture, mt.mipmapLevelCount > 1, let blit = cmd.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: mt)
+            blit.endEncoding()
+            maskNeedsMips = false
+        }
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
         if mode == .calibration || frameTexture != nil {
             let r = mode == .calibration ? CGRect(origin: .zero, size: view.drawableSize) : videoRect(in: view.drawableSize)
@@ -212,6 +225,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setFragmentTexture(frameTexture ?? maskTexture, index: 0)
             enc.setFragmentTexture(maskTexture, index: 1)
             var u = uniforms
+            let amount = min(max((u.gain - 1) / (Renderer.fullGain - 1), 0), 1)
+            u.strength = subjectStrength * amount   // 1.0x = untouched
             enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
