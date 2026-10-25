@@ -86,6 +86,28 @@ Night drive, 97 frames, 1080p:
 
 One short clip: evidence, not proof. The decisive number is SAM 2 speed on MPS.
 
+## Results on the M3 Pro (MPS), Oct 24
+
+Night drive, 97 frames, 1080p, `bench/report.json`:
+
+| | A: YOLO11n-seg + ByteTrack | B: YOLO keyframes + SAM 2.1 Tiny |
+|---|---|---|
+| Time / FPS | **9.9 s / 9.8 fps** | 117 s / 0.83 fps (SAM 2 propagation 111 s) |
+| Peak memory | **681 MB** | 1,139 MB |
+| Mask stability, consecutive-frame IoU (mean / p5) | 0.960 / 0.920 | **0.983 / 0.968** |
+| Edge alignment | 5.72 | **7.11** |
+| Tracking gaps | 0 | 0 |
+| A vs B subject agreement (IoU) | 0.908 | |
+
+SAM 2 ran fully on MPS (no CPU fallback, 0 window failures), about 10x faster than the
+cloud CPU run but ~36x slower than real time: offline "precise masks" only. Visual check of
+`masks_A_vs_B.mp4` agrees: SAM 2 fits the car more tightly and flickers less.
+
+Metal player: builds and runs. Calibration 2x/3x/4x patches are brighter than 1x and the
+title bar; headroom rises as display brightness drops. With SAM 2 masks the car glows above
+SDR white, the background matches the original, audio stays in sync, and the still test
+is aligned, upright and correctly coloured.
+
 ## Status
 
 | Stage | State |
