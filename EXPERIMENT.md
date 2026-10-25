@@ -164,19 +164,18 @@ to plain scaling for HLG/PQ input. The working copy is not tone-mapped and keeps
 | Stage | State |
 |---|---|
 | 1 Inspect + worktree | done |
-| 2 SAM 2 install + image test | done (CPU); MPS: `setup_sam2.sh` checks it |
-| 3 YOLO to SAM 2 propagation | done, verified on CPU |
-| 4 Benchmark harness | done; Mac numbers pending |
-| 5 Metal static EDR | written, **not compiled** (no macOS here) |
-| 6 Metal video (AVPlayer clock, masks mmap'd) | written, not compiled |
-| 7 SAM 2 masks in Metal | wired via `export_native.py`, untested on Mac |
-| 8 Interactive controls | slider, modes, wipe, attention view written |
-| 9 Evaluation | after Mac numbers |
+| 2 SAM 2 install + image test | done, runs fully on MPS |
+| 3 YOLO to SAM 2 propagation | done; 15 Hz stride, up to 3 objects, drift guard |
+| 4 Benchmark harness | done; M3 Pro numbers above |
+| 5 Metal static EDR | done, verified on the M3 Pro |
+| 6 Metal video (AVPlayer clock, masks mmap'd) | done, verified (audio in sync) |
+| 7 SAM 2 masks in Metal | done; jobs now export native/ automatically, with Claude's subject choice |
+| 8 Interactive controls + library | done; "Add video" in the library (Oct 25, needs a Mac build check) |
+| 9 Evaluation | numbers above; no user testing yet |
 
 ## Known risks
 
-- **SAM 2 speed on MPS is unknown.** If it's far from real time, it stays an offline
+- **SAM 2 is far from real time on MPS** (0.5 to 2 fps), so it stays an offline
   "precise masks" option and YOLO remains the default.
 - Some SAM 2 ops may fall back to CPU on MPS (`PYTORCH_ENABLE_MPS_FALLBACK=1` is set).
-- The Swift code has never been compiled; expect a round of small compiler fixes.
 - `still_mask.png` is loaded as an 8-bit image; the shader reads its red channel.
