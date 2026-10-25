@@ -10,7 +10,7 @@ source .venv-sam2/bin/activate
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 # CPU/MPS build: skip the optional CUDA extension (not usable on Apple Silicon).
-SAM2_BUILD_CUDA=0 pip install -q "sam2 @ git+https://github.com/facebookresearch/sam2.git"
+SAM2_BUILD_CUDA=0 pip install -q "git+https://github.com/facebookresearch/sam2.git"
 mkdir -p backend/models
 CKPT=backend/models/sam2.1_hiera_tiny.pt
 if [ ! -f "$CKPT" ]; then
