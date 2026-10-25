@@ -3,9 +3,11 @@
 //   swift run -c release KeylightPlayer --calibration
 //   swift run -c release KeylightPlayer --image still.png --mask still_mask.png
 //   swift run -c release KeylightPlayer <job>/native          (video.mp4 + masks.json)
+//   add --saturation 1.35 to start with whole-frame saturation on (opt-in, off by default)
 //
 // Keys: Space play/pause · W wipe · E enhanced · O original · A attention · C calibration
-//       Up/Down change subject brightness · drag in the video to move the wipe.
+//       Up/Down change subject brightness · drag in the video to move the wipe
+//       S whole-frame saturation on/off · [ / ] less / more saturation.
 import AppKit
 import MetalKit
 
@@ -70,6 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         func take(_ flag: String) -> String? {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
             let v = args[i + 1]; args.removeSubrange(i...i + 1); return v
+        }
+        if let sat = take("--saturation") {
+            guard let v = Float(sat), v >= 1 else { fatal("--saturation needs a number >= 1, e.g. 1.35") }
+            renderer.saturationAmount = min(v, 2)
+            renderer.saturationOn = v > 1
         }
         do {
             if args.contains("--calibration") {
@@ -175,6 +182,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case 49: togglePlay(); return true                         // space
         case 126: gainSlider.doubleValue += 0.2; gainChanged(); return true   // up
         case 125: gainSlider.doubleValue -= 0.2; gainChanged(); return true   // down
+        default: break
+        }
+        switch e.charactersIgnoringModifiers {
+        case "s", "S": renderer.saturationOn.toggle(); return true
+        case "[", "]":
+            let step: Float = e.charactersIgnoringModifiers == "]" ? 0.05 : -0.05
+            renderer.saturationAmount = min(max(renderer.saturationAmount + step, 1.05), 2)
+            renderer.saturationOn = true
+            return true
         default: break
         }
         switch e.charactersIgnoringModifiers?.lowercased() {

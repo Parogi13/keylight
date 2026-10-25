@@ -19,7 +19,7 @@ struct Uniforms {
     int   mode;        // 0 enhanced, 1 original, 2 attention overlay, 3 calibration
     int   hasMask;
     float peakLimit;   // never exceed this multiple of SDR white
-    float pad;
+    float saturation;  // whole-frame saturation multiple (1 = off, opt-in)
 };
 
 struct VOut { float4 pos [[position]]; float2 uv; };
@@ -45,6 +45,30 @@ static float3 rolloff(float3 rgb, float peak) {
     float r = peak - knee;
     float y2 = knee + r * tanh((y - knee) / r);
     return rgb * (y2 / max(y, 1e-5));
+}
+
+// Linear sRGB <-> linear Display P3 (both D65, so luminance is unchanged).
+constant float3x3 SRGB_TO_P3 = float3x3(float3(0.8225, 0.0332, 0.0171),
+                                        float3(0.1774, 0.9669, 0.0724),
+                                        float3(0.0000, 0.0000, 0.9108));
+constant float3x3 P3_TO_SRGB = float3x3(float3( 1.2249, -0.0420, -0.0197),
+                                        float3(-0.2247,  1.0419, -0.0786),
+                                        float3( 0.0000,  0.0000,  1.0979));
+constant float3 LUMA_P3 = float3(0.2290, 0.6917, 0.0793);
+
+static float3 saturate_frame(float3 lin, float sat) {
+    // Push chroma away from luma in P3, so colours may go past sRGB into the XDR
+    // panel's gamut. The push stops where any P3 channel would go negative, so
+    // nothing clips and hue is preserved. Luminance is unchanged.
+    if (sat <= 1.0) return lin;
+    float3 p = SRGB_TO_P3 * lin;
+    float y = dot(p, LUMA_P3);
+    float3 d = p - y;
+    float t = sat;
+    for (int i = 0; i < 3; i++) {
+        if (d[i] < -1e-6) t = min(t, y / -d[i]);
+    }
+    return P3_TO_SRGB * (y + max(t, 1.0) * d);
 }
 
 static float3 subject(float3 lin, constant Uniforms& u) {
@@ -92,7 +116,8 @@ fragment float4 kl_fragment(VOut in [[stage_in]],
     // Two-zone blend, same as the Python renderer: the lift uses a tighter core
     // (m^2.5) so the feathered edge shows the original, not a bright cut-out ring.
     float core = m * m * sqrt(m);
-    float3 out = mix(lin, subject(lin, u), core);
+    float3 base = saturate_frame(lin, u.saturation);   // opt-in, whole frame
+    float3 out = mix(base, subject(base, u), core);
 
     if (u.wipe >= 0.0) {
         float dx = in.uv.x - u.wipe;

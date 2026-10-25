@@ -70,7 +70,13 @@ swift run -c release KeylightPlayer --image ../../backend/outputs/<job_id>/nativ
 ```
 
 Keys: Space play/pause, W wipe (drag to move), E enhanced, O original, A attention,
-C calibration, Up/Down subject brightness.
+C calibration, Up/Down subject brightness, S whole-frame saturation (opt-in, off by
+default; `--saturation 1.35` starts with it on), [ / ] less / more saturation.
+
+Whole-frame saturation pushes chroma in linear Display P3 and stops at the P3 gamut edge
+(hue and luminance preserved), so colours can go past sRGB on the XDR panel. It is the one
+mode that touches the background, which is why it is off by default; the wipe's left side
+stays the untouched original.
 
 ## Results so far (cloud CPU, 2 cores: **not** representative of the M3 Pro)
 

@@ -14,7 +14,7 @@ struct Uniforms {
     var mode: Int32 = 0
     var hasMask: Int32 = 0
     var peakLimit: Float = 4
-    var pad: Float = 0
+    var saturation: Float = 1
 }
 
 enum ViewMode: Int32 { case enhanced = 0, original = 1, attention = 2, calibration = 3 }
@@ -57,6 +57,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     var uniforms = Uniforms()
     var mode: ViewMode = .enhanced
     var wipeOn = false
+    /// Opt-in whole-frame saturation (S toggles, [ / ] adjust). Off = untouched background.
+    var saturationOn = false
+    var saturationAmount: Float = 1.35
 
     // Sources
     private(set) var frameTexture: MTLTexture?
@@ -183,6 +186,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         uniforms.headroom = Float(screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)
         uniforms.mode = mode.rawValue
         if !wipeOn { uniforms.wipe = -1 }
+        uniforms.saturation = saturationOn ? saturationAmount : 1
 
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer() else { return }
@@ -214,8 +218,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             lastHUD = now
             let potential = screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
             let peak = min(Double(uniforms.headroom), Double(uniforms.peakLimit))
-            onStats?(String(format: "EDR headroom %.2fx (potential %.1fx)  ·  subject peak %.2fx SDR white  ·  GPU %.2f ms  ·  frame %ld",
-                            uniforms.headroom, potential, max(1, peak), gpuMs, frameIndex))
+            let sat = saturationOn ? String(format: "%.2fx", saturationAmount) : "off"
+            onStats?(String(format: "EDR headroom %.2fx (potential %.1fx)  ·  subject peak %.2fx SDR white  ·  saturation %@  ·  GPU %.2f ms  ·  frame %ld",
+                            uniforms.headroom, potential, max(1, peak), sat, gpuMs, frameIndex))
         }
     }
 }
