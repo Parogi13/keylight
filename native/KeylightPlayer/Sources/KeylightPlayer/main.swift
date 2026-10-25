@@ -197,8 +197,11 @@ func fatal(_ message: String) -> Never {
     exit(1)
 }
 
-let app = NSApplication.shared
-app.setActivationPolicy(.regular)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+// Top-level code runs on the main thread; tell the compiler so it can call MainActor APIs.
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.run()
+}
