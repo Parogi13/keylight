@@ -24,8 +24,19 @@ enum Theme {
     static let ember = NSColor(hex: 0xff9b7a)    // destructive
     static let muted = NSColor(hex: 0x8f9690)
 
+    /// Where the bundled fonts are: Keylight.app/Contents/Resources/Fonts when installed with
+    /// make_app.sh, else the SwiftPM resource bundle beside the executable (`swift run`).
+    /// Not `Bundle.module`, which calls fatalError when it can't find its bundle.
+    private static var fontsDirectory: URL? {
+        [Bundle.main.resourceURL?.appendingPathComponent("Fonts"),
+         Bundle.main.bundleURL.appendingPathComponent("KeylightPlayer_KeylightPlayer.bundle/Fonts"),
+         Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("KeylightPlayer_KeylightPlayer.bundle/Fonts")]
+            .compactMap { $0 }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     static func registerFonts() {
-        guard let dir = Bundle.module.url(forResource: "Fonts", withExtension: nil),
+        guard let dir = fontsDirectory,
               let urls = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
         for url in urls where url.pathExtension == "ttf" {
             var error: Unmanaged<CFError>?

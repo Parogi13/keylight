@@ -69,7 +69,9 @@ swift run -c release KeylightPlayer --image ../../backend/outputs/<job_id>/nativ
                                     --mask  ../../backend/outputs/<job_id>/native/still_mask.png
 ```
 
-Library (main menu): `swift run -c release KeylightPlayer` with no arguments opens it. It
+Library (main menu): `swift run -c release KeylightPlayer` with no arguments opens it, or
+`native/KeylightPlayer/make_app.sh` installs a double-clickable `~/Applications/Keylight.app`
+(lamp icon; finds the repo via KEYLIGHT_ROOT in its Info.plist, Homebrew on PATH for ffmpeg). It
 lists every video with a native export (`backend/outputs/<job>/native`, `bench/<clip>/<backend>/native`),
 in the web app's look (lamp logo, glowing wordmark, Carbon Black, IBM Plex Serif bundled
 under OFL). Double-click a name to play it; the pencil or right-click renames it in place

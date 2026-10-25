@@ -80,6 +80,7 @@ Native Metal player (Xcode command-line tools, `xcode-select --install`):
 ```bash
 cd native/KeylightPlayer
 swift run -c release KeylightPlayer                 # library: Add video, open, rename, delete
+./make_app.sh                                       # or install Keylight.app (Spotlight, Launchpad, Dock)
 swift run -c release KeylightPlayer --calibration   # check your display's EDR headroom
 ```
 
