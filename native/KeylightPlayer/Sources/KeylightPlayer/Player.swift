@@ -34,6 +34,8 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
                                                  trackingMode: .selectOne, target: nil, action: nil)
     private let stats = Theme.label("", size: 13, color: Theme.mist)
     private let playButton = PillButton("Pause", style: .quiet, size: 14, target: nil, action: nil)
+    private var gainDirty = false            // brightness changed since the last save
+    private var saveWork: DispatchWorkItem?
 
     /// `saturation`: nil keeps the renderer default (on, 1.1x); 1 turns it off.
     init(source: PlayerSource, title: String, saturation: Float? = nil) throws {
@@ -78,6 +80,9 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
                                    masksJSON: FileManager.default.fileExists(atPath: masks.path) ? masks : nil)
         }
         if modeControl.selectedSegment < 0 { modeControl.selectedSegment = 0 }
+        if case let .video(dir) = source, let g = (Library.settings(dir)["gain"] as? NSNumber)?.doubleValue {
+            gainSlider.doubleValue = min(max(g, gainSlider.minValue), gainSlider.maxValue)   // this video's brightness
+        }
         buildUI()
         window.center()
     }
@@ -91,6 +96,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     func close() { window.close() }
 
     func windowWillClose(_ notification: Notification) {
+        saveGainNow()
         // Stop sound and drawing now; the window may outlive this controller briefly.
         renderer.stop()
         view.isPaused = true
@@ -104,13 +110,13 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         view.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(view)
 
-        gainSlider.target = self; gainSlider.action = #selector(gainChanged)
+        gainSlider.target = self; gainSlider.action = #selector(gainSliderMoved)
         gainSlider.trackFillColor = Theme.key
         modeControl.target = self; modeControl.action = #selector(modeChanged)
         modeControl.selectedSegmentBezelColor = Theme.key
         modeControl.font = Theme.serif(13, .medium)
         playButton.target = self; playButton.action = #selector(togglePlay)
-        gainChanged()
+        applyGain()
 
         let library = PillButton("Library", style: .link, size: 14, target: self, action: #selector(showLibrary))
         let title = Theme.label("Subject brightness", size: 14)
@@ -146,9 +152,28 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 
     @objc private func showLibrary() { onShowLibrary?() }
 
-    @objc private func gainChanged() {
+    private func applyGain() {
         renderer.uniforms.gain = Float(gainSlider.doubleValue)
         gainLabel.stringValue = String(format: "%.1fx", gainSlider.doubleValue)
+    }
+
+    /// The user changed the brightness (slider or Up/Down): apply it, and save it for this
+    /// video a moment after they stop (and on close). Opening a video never saves.
+    @objc private func gainSliderMoved() {
+        applyGain()
+        gainDirty = true
+        saveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.saveGainNow() }
+        saveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    private func saveGainNow() {
+        saveWork?.cancel()
+        guard gainDirty, case let .video(dir) = source else { return }
+        gainDirty = false
+        let value = (gainSlider.doubleValue * 10).rounded() / 10
+        try? Library.updateSettings(dir) { $0["gain"] = value }
     }
 
     @objc private func modeChanged() {
@@ -181,8 +206,8 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     private func handleKey(_ e: NSEvent) -> Bool {
         switch e.keyCode {
         case 49: togglePlay(); return true                         // space
-        case 126: gainSlider.doubleValue += 0.2; gainChanged(); return true   // up
-        case 125: gainSlider.doubleValue -= 0.2; gainChanged(); return true   // down
+        case 126: gainSlider.doubleValue += 0.2; gainSliderMoved(); return true   // up
+        case 125: gainSlider.doubleValue -= 0.2; gainSliderMoved(); return true   // down
         default: break
         }
         switch e.charactersIgnoringModifiers {

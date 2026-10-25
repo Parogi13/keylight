@@ -4,8 +4,9 @@
 //   bench/<clip>/<backend>/native       benchmark results (YOLO / SAM 2)
 // Double-click a name to open the Keylight player; the trash bin at the right end moves the
 // video's folder to the macOS Trash (recoverable), after an inline Delete / Keep confirm.
-// The pencil (or right-click > Rename) edits the name in place; a custom name is stored in
-// native/library.json next to the video, so folders and the web app's job IDs never change.
+// The pencil (or right-click > Rename) edits the name in place. Per-video settings (custom
+// name, subject brightness) live in native/library.json next to the video, so folders and
+// the web app's job IDs never change.
 import AppKit
 import UniformTypeIdentifiers
 
@@ -64,8 +65,8 @@ enum Library {
         let native = folder.appendingPathComponent("native")
         let video = native.appendingPathComponent("video.mp4")
         guard FileManager.default.fileExists(atPath: video.path) else { return nil }
-        let custom = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: native.appendingPathComponent("library.json"))))
-            as? [String: Any])?["title"] as? String
+        let saved = settings(native)
+        let custom = saved["title"] as? String
         let masks = native.appendingPathComponent("masks.json")
         var parts: [String] = tag.map { [$0] } ?? []
         if let meta = (try? JSONSerialization.jsonObject(with: Data(contentsOf: masks))) as? [String: Any],
@@ -76,19 +77,39 @@ enum Library {
         }
         let modified = (try? (FileManager.default.fileExists(atPath: masks.path) ? masks : video)
             .resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
+        if let gain = (saved["gain"] as? NSNumber)?.doubleValue {
+            parts.append(String(format: "%.1f×", gain))   // this video's saved subject brightness
+        }
         return LibraryItem(title: custom ?? title, detail: parts.joined(separator: " · "), nativeDir: native, folder: folder,
                            modified: modified ?? .distantPast)
     }
 
     /// Stores a display name for the video; an empty name goes back to the default.
-    static func rename(_ item: LibraryItem, to title: String) throws {
-        let file = item.nativeDir.appendingPathComponent("library.json")
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.isEmpty {
+    /// A video's saved settings (native/library.json): "title", "gain". Empty if none.
+    static func settings(_ nativeDir: URL) -> [String: Any] {
+        ((try? JSONSerialization.jsonObject(with: Data(contentsOf: nativeDir.appendingPathComponent("library.json"))))
+            as? [String: Any]) ?? [:]
+    }
+
+    /// Changes some of a video's settings, keeping the others (a rename keeps the
+    /// brightness and vice versa). Removes the file when nothing is left.
+    static func updateSettings(_ nativeDir: URL, _ change: (inout [String: Any]) -> Void) throws {
+        var s = settings(nativeDir)
+        change(&s)
+        let file = nativeDir.appendingPathComponent("library.json")
+        if s.isEmpty {
             if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
             return
         }
-        try JSONSerialization.data(withJSONObject: ["title": t], options: [.prettyPrinted]).write(to: file, options: .atomic)
+        try JSONSerialization.data(withJSONObject: s, options: [.prettyPrinted, .sortedKeys]).write(to: file, options: .atomic)
+    }
+
+    /// Stores a display name for the video; an empty name goes back to the default.
+    static func rename(_ item: LibraryItem, to title: String) throws {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        try updateSettings(item.nativeDir) { s in
+            if t.isEmpty { s.removeValue(forKey: "title") } else { s["title"] = t }
+        }
     }
 
     private static func subfolders(_ dir: URL) -> [URL] {

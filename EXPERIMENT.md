@@ -75,7 +75,8 @@ Library (main menu): `swift run -c release KeylightPlayer` with no arguments ope
 lists every video with a native export (`backend/outputs/<job>/native`, `bench/<clip>/<backend>/native`),
 in the web app's look (lamp logo, glowing wordmark, Carbon Black, IBM Plex Serif bundled
 under OFL). Double-click a name to play it; the pencil or right-click renames it in place
-(stored in `native/library.json`); the trash bin moves its folder to the macOS Trash after
+(stored in `native/library.json`, with the video's own subject brightness: set it with the slider or
+Up/Down, it is saved per video and shown in the row); the trash bin moves its folder to the macOS Trash after
 a Delete / Keep confirm. Cmd+L library, Cmd+W close, Cmd+Q quit.
 **Add video** (or drop files on the window) runs `scripts/process_native.py`: the web app's
 pipeline plus the native export, in `.venv-sam2` (or `KEYLIGHT_PYTHON`), one video at a time
