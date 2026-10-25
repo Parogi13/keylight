@@ -6,6 +6,9 @@
    b. a local heuristic score: size, confidence, class prior, centrality and how
       persistently the track appears in the shot.
    Switching uses hysteresis + a minimum dwell so focus does not ping-pong.
+   Companions: with no focus instruction, up to MAX_COMPANIONS objects of the same kind
+   (person with person, vehicle with vehicle) that score close to the subject are lit
+   with it, e.g. two people walking together. A focus instruction lights only its subject.
 
 2. Weight smoothing. Each object ID gets a scalar weight w_i(t): 1 when it is the
    target, 0 otherwise. Those scalars are smoothed with a symmetric window that
@@ -30,6 +33,10 @@ import numpy as np
 from .perceive import SALIENCY_FALLBACK, SALIENT_ID, Perception
 
 SALIENT_WEIGHT = 0.5
+COMPANION_ENTER = 0.7   # a same-kind object scoring >= 70% of the subject joins it ...
+COMPANION_EXIT = 0.5    # ... and stays until it drops below 50% (no flicker at the line)
+MAX_COMPANIONS = 2      # at most three lit objects, so a crowd doesn't all light up
+VEHICLES = {"car", "truck", "bus", "motorcycle"}
 
 CLASS_PRIOR = {
     "person": 1.0,
@@ -51,11 +58,13 @@ class Segment:
     cls: str | None
     source: str  # "semantic" | "heuristic" | "none"
     reason: str = ""
+    companions: list[int] = field(default_factory=list)  # also lit alongside the target
 
     def to_dict(self, fps: float) -> dict:
         return {"start": self.start, "end": self.end,
                 "t0": round(self.start / fps, 3), "t1": round(self.end / fps, 3),
-                "target": self.target, "cls": self.cls, "source": self.source, "reason": self.reason}
+                "target": self.target, "cls": self.cls, "source": self.source, "reason": self.reason,
+                "companions": self.companions}
 
 
 @dataclass
@@ -228,25 +237,57 @@ def select_targets(p: Perception, semantic: dict[int, dict] | None = None,
     return raw, src, why
 
 
+def _kind(cls: str | None) -> str | None:
+    return "vehicle" if cls in VEHICLES else cls
+
+
+def select_companions(p: Perception, raw: list[int | None]) -> list[set[int]]:
+    """Per frame, the objects lit alongside the target: same kind, scoring close to it."""
+    comp: list[set[int]] = [set() for _ in p.frames]
+    for lo, hi in p.shot_bounds():
+        scores = _scores(p, lo, hi)
+        active: set[int] = set()
+        for t in range(lo, hi):
+            s, cur = scores[t - lo], raw[t]
+            if cur is None or cur not in s or s[cur] <= 0:
+                active = {i for i in active if i in s}  # subject dropped out briefly: keep, don't add
+                comp[t] = set(active)
+                continue
+            kind = _kind(next(o.cls for o in p.frames[t] if o.id == cur))
+            cands = []
+            for o in p.frames[t]:
+                if o.id == cur or o.id == SALIENT_ID or o.id not in s or _kind(o.cls) != kind:
+                    continue
+                r = s[o.id] / s[cur]
+                if r >= (COMPANION_EXIT if o.id in active else COMPANION_ENTER):
+                    cands.append((r, o.id))
+            active = {i for _, i in sorted(cands, reverse=True)[:MAX_COMPANIONS]}
+            comp[t] = set(active)
+    return comp
+
+
 # ---------------------------------------------------------------------------
 def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | None = None,
-          feather: float = 0.025) -> Attention:
+          feather: float = 0.025, companions: bool = True) -> Attention:
+    """companions=False lights only the target (use it when the user named a subject)."""
     if not SALIENCY_FALLBACK:
         # Perception caches from older runs may still contain saliency blobs; with
         # the fallback off they must never be highlighted (no subject = untouched).
         p.frames = [[o for o in objs if o.id != SALIENT_ID] for objs in p.frames]
     raw, src, why = select_targets(p, semantic)
+    comp = select_companions(p, raw) if companions else [set() for _ in p.frames]
+    lit = [({raw[t]} if raw[t] is not None else set()) | comp[t] for t in range(len(p.frames))]
 
     # Half-window of 0.15 s .. 1.0 s. Lookahead never exceeds one second.
     half = max(1, int(round(p.fps * (0.15 + 0.85 * float(np.clip(smoothing, 0, 1))))))
     kernel = np.hanning(2 * half + 3)[1:-1]  # strictly positive taps
 
-    ids = sorted({i for i in raw if i is not None})
+    ids = sorted(set().union(*lit)) if lit else []
     weights: list[dict[int, float]] = [dict() for _ in p.frames]
     for lo, hi in p.shot_bounds():
         n = hi - lo
         for oid in ids:
-            onehot = np.array([1.0 if raw[t] == oid else 0.0 for t in range(lo, hi)])
+            onehot = np.array([1.0 if oid in lit[t] else 0.0 for t in range(lo, hi)])
             if not onehot.any():
                 continue
             # 'full' then centre-crop: np.convolve(mode="same") returns len(kernel)
@@ -266,8 +307,9 @@ def build(p: Perception, smoothing: float = 0.6, semantic: dict[int, dict] | Non
     for t in range(len(p.frames)):
         cls = next((o.cls for o in p.frames[t] if o.id == raw[t]), None)
         if not segments or t in cut_set or segments[-1].target != raw[t]:
-            segments.append(Segment(t, t + 1, raw[t], cls, src[t], why[t]))
+            segments.append(Segment(t, t + 1, raw[t], cls, src[t], why[t], sorted(comp[t])))
         else:
+            segments[-1].companions = sorted(set(segments[-1].companions) | comp[t])
             segments[-1].end = t + 1
             segments[-1].cls = segments[-1].cls or cls
             if src[t] == "semantic":

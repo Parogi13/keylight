@@ -132,7 +132,8 @@ def _decide_and_render(job, info, p, settings, report, timings, write_original) 
     timings["understand"] = time.time() - t
 
     t = time.time(); report("attention", 0)
-    att = attention.build(p, smoothing=float(settings.get("smoothing", 0.6)), semantic=decisions)
+    att = attention.build(p, smoothing=float(settings.get("smoothing", 0.6)), semantic=decisions,
+                          companions=not (settings.get("focus") or "").strip())  # a named subject is lit alone
     timings["attention"] = time.time() - t
 
     t = time.time()

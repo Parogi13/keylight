@@ -49,7 +49,8 @@ def export(job: Path, att: "attention.Attention | None" = None, still_at: float 
         p = perceive.Perception.load(job)
     if att is None:
         att = attention.build(p, smoothing=float(settings.get("smoothing", 0.6)),
-                              semantic=_semantic_for(job, settings) or None)
+                              semantic=_semantic_for(job, settings) or None,
+                              companions=not (settings.get("focus") or "").strip())
     n = len(p.frames)
 
     tmp = out / "masks.bin.part"

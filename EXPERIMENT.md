@@ -164,6 +164,16 @@ heuristic, with a drift guard. Tracking only the subject was tried and rejected:
 Known issue (also on main): Homebrew ffmpeg 9 has no `zscale`, so `normalize()` falls back
 to plain scaling for HLG/PQ input. The working copy is not tone-mapped and keeps its HLG tag.
 
+## Companions (Oct 25)
+
+Attention used to light exactly one subject per moment, so two people walking together got
+one lit and one dark (an iPhone night clip: both detected in 267/267 frames at 0.88, Claude
+picked #1, #2 got 0.00 attention). Now, with no focus instruction, up to two more objects of
+the same kind (person/person, vehicle/vehicle) scoring >= 70% of the subject are lit with it
+(hysteresis: they stay until < 50%), smoothed like the subject. On that clip both people get
+0.80 attention; visually confirmed on the XDR. A focus instruction lights only its subject.
+The focus timeline records them as `companions`.
+
 ## Status
 
 | Stage | State |
