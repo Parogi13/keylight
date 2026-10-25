@@ -57,8 +57,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     var uniforms = Uniforms()
     var mode: ViewMode = .enhanced
     var wipeOn = false
-    /// Opt-in whole-frame saturation (S toggles, [ / ] adjust). Off = untouched background.
-    var saturationOn = false
+    /// Whole-frame saturation, on by default (S toggles, [ / ] adjust). Off = untouched background.
+    var saturationOn = true
     var saturationAmount: Float = 1.35
 
     // Sources

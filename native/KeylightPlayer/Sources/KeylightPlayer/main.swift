@@ -3,7 +3,7 @@
 //   swift run -c release KeylightPlayer --calibration
 //   swift run -c release KeylightPlayer --image still.png --mask still_mask.png
 //   swift run -c release KeylightPlayer <job>/native          (video.mp4 + masks.json)
-//   add --saturation 1.35 to start with whole-frame saturation on (opt-in, off by default)
+//   whole-frame saturation starts on at 1.35x; --saturation 1 starts with it off
 //
 // Keys: Space play/pause · W wipe · E enhanced · O original · A attention · C calibration
 //       Up/Down change subject brightness · drag in the video to move the wipe
