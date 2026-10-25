@@ -6,9 +6,11 @@
    b. a local heuristic score: size, confidence, class prior, centrality and how
       persistently the track appears in the shot.
    Switching uses hysteresis + a minimum dwell so focus does not ping-pong.
-   Companions: with no focus instruction, up to MAX_COMPANIONS objects of the same kind
-   (person with person, vehicle with vehicle) that score close to the subject are lit
-   with it, e.g. two people walking together. A focus instruction lights only its subject.
+   Companions: with no focus instruction, other objects of the same kind (person with
+   person, vehicle with vehicle) are lit with the subject. A small group (at most
+   MAX_COMPANIONS others above GROUP_MIN_AREA) is lit whole, near or far, e.g. three
+   people walking up a beach; in a crowd only those scoring close to the subject are.
+   A focus instruction lights only its subject.
 
 2. Weight smoothing. Each object ID gets a scalar weight w_i(t): 1 when it is the
    target, 0 otherwise. Those scalars are smoothed with a symmetric window that
@@ -36,6 +38,7 @@ SALIENT_WEIGHT = 0.5
 COMPANION_ENTER = 0.7   # a same-kind object scoring >= 70% of the subject joins it ...
 COMPANION_EXIT = 0.5    # ... and stays until it drops below 50% (no flicker at the line)
 MAX_COMPANIONS = 2      # at most three lit objects, so a crowd doesn't all light up
+GROUP_MIN_AREA = 0.0015 # a group member must cover >= 0.15% of the frame (not a speck far away)
 VEHICLES = {"car", "truck", "bus", "motorcycle"}
 
 CLASS_PRIOR = {
@@ -74,6 +77,8 @@ class Attention:
     raw: list[int | None]                     # per frame raw target
     segments: list[Segment]
     feather: float
+    grow: bool = True                           # dilate before blurring (soft SDR/HDR edge)
+    temporal: int = 0                           # motion-aligned per-object smoothing, +-frames
     _index: dict = field(default_factory=dict)  # id -> sorted frames where id present
     # Small per-instance LRU of composed raw masks (the 3-tap filter reuses each one
     # three times). Bounded so long videos don't grow memory; locked for render threads.
@@ -101,6 +106,37 @@ class Attention:
         o = next(o for o in self.p.frames[best] if o.id == oid)
         return self.p.mask(o.mask)
 
+    def _object_mask(self, t: int, oid: int) -> np.ndarray | None:
+        """oid's mask at t. With `temporal`, a Gaussian average over nearby frames, each
+        shifted by the object's straight-line motion fitted over the window (per-frame
+        boxes jitter too), so segmentation jitter at the edge cancels without smearing
+        a moving subject."""
+        base = self._nearest_mask(t, oid)
+        if self.temporal <= 0 or base is None:
+            return base
+        lo, hi = _shot_range(self.p, t)
+        near = [(u, o) for u in range(max(lo, t - self.temporal), min(hi, t + self.temporal + 1))
+                for o in self.p.frames[u] if o.id == oid]
+        if len(near) < 3 or all(u != t for u, _ in near):
+            return base
+        us = np.array([u for u, _ in near], np.float64)
+        vx = np.polyfit(us, [(o.box[0] + o.box[2]) / 2 for _, o in near], 1)[0]
+        vy = np.polyfit(us, [(o.box[1] + o.box[3]) / 2 for _, o in near], 1)[0]
+        sx, sy = self.p.mask_w / self.p.width, self.p.mask_h / self.p.height
+        sigma = max(1.0, self.temporal / 2)
+        acc = np.zeros((self.p.mask_h, self.p.mask_w), np.float32)
+        wsum = 0.0
+        for u, o in near:
+            k = u - t
+            w = float(np.exp(-k * k / (2 * sigma * sigma)))
+            mk = self.p.mask(o.mask).astype(np.float32)
+            dx, dy = -vx * k * sx, -vy * k * sy
+            if abs(dx) >= 0.25 or abs(dy) >= 0.25:
+                mk = cv2.warpAffine(mk, np.float32([[1, 0, dx], [0, 1, dy]]), (self.p.mask_w, self.p.mask_h))
+            acc += w * mk
+            wsum += w
+        return acc / wsum
+
     def _raw_mask(self, t: int) -> np.ndarray:
         with self._lock:
             hit = self._cache.get(t)
@@ -111,7 +147,7 @@ class Attention:
         for oid, w in self.weights[t].items():
             if w < 1e-3:
                 continue
-            mk = self._nearest_mask(t, oid)
+            mk = self._object_mask(t, oid)
             if mk is not None:
                 m += w * mk
         np.clip(m, 0, 1, out=m)
@@ -120,6 +156,13 @@ class Attention:
             while len(self._cache) > self.CACHE_SIZE:
                 self._cache.popitem(last=False)
         return m
+
+    def tightened(self, feather: float, temporal: int = 0) -> "Attention":
+        """Same attention, hugging the subjects: no dilation and a small blur. For the EDR
+        player, where a soft edge lifts a bright background (sky behind a silhouette) above
+        SDR white and shows as a halo."""
+        return Attention(self.p, self.weights, self.raw, self.segments, feather, grow=False,
+                         temporal=temporal, _index=self._index)
 
     def mask(self, t: int) -> np.ndarray:
         """Feathered low-res attention mask for frame t, float32 in [0, 1]."""
@@ -132,7 +175,7 @@ class Attention:
         diag = float(np.hypot(self.p.mask_w, self.p.mask_h))
         # Feather scales with the subject: a small car gets a tight edge, a close-up a soft one.
         size = float(np.sqrt(max(acc.sum(), 1.0)))
-        r = int(min(diag * 0.006, 0.04 * size))
+        r = int(min(diag * 0.006, 0.04 * size)) if self.grow else 0
         if r >= 1:
             acc = cv2.dilate(acc, np.ones((2 * r + 1, 2 * r + 1), np.uint8))
         sigma = float(np.clip(0.12 * size, 0.8, diag * self.feather))
@@ -242,7 +285,8 @@ def _kind(cls: str | None) -> str | None:
 
 
 def select_companions(p: Perception, raw: list[int | None]) -> list[set[int]]:
-    """Per frame, the objects lit alongside the target: same kind, scoring close to it."""
+    """Per frame, the objects lit alongside the target: the whole of a small same-kind
+    group, or in a crowd the members scoring close to the target."""
     comp: list[set[int]] = [set() for _ in p.frames]
     for lo, hi in p.shot_bounds():
         scores = _scores(p, lo, hi)
@@ -254,12 +298,15 @@ def select_companions(p: Perception, raw: list[int | None]) -> list[set[int]]:
                 comp[t] = set(active)
                 continue
             kind = _kind(next(o.cls for o in p.frames[t] if o.id == cur))
+            frame_area = p.width * p.height
+            peers = [o for o in p.frames[t]
+                     if o.id != cur and o.id != SALIENT_ID and o.id in s and _kind(o.cls) == kind
+                     and (o.box[2] - o.box[0]) * (o.box[3] - o.box[1]) >= GROUP_MIN_AREA * frame_area]
+            small_group = len(peers) <= MAX_COMPANIONS
             cands = []
-            for o in p.frames[t]:
-                if o.id == cur or o.id == SALIENT_ID or o.id not in s or _kind(o.cls) != kind:
-                    continue
+            for o in peers:
                 r = s[o.id] / s[cur]
-                if r >= (COMPANION_EXIT if o.id in active else COMPANION_ENTER):
+                if small_group or r >= (COMPANION_EXIT if o.id in active else COMPANION_ENTER):
                     cands.append((r, o.id))
             active = {i for _, i in sorted(cands, reverse=True)[:MAX_COMPANIONS]}
             comp[t] = set(active)

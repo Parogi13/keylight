@@ -176,6 +176,28 @@ the same kind (person/person, vehicle/vehicle) scoring >= 70% of the subject are
 0.80 attention; visually confirmed on the XDR. A focus instruction lights only its subject.
 The focus timeline records them as `companions`.
 
+## Groups, edges and lighting in the native player (Oct 25)
+
+A dusk beach clip (three people walking toward houses, backlit) exposed four problems:
+
+- **SAM 2 slots:** a big central surfboard outranked a far walker for one of the 3 SAM 2
+  slots. Slots now go to classes attention can light (people, vehicles, animals) before
+  props, and a prop never displaces a subject. The third walker went from 1 s to 9 s tracked.
+- **Groups:** companions needed >= 70% of the subject's score, so people farther away
+  (smaller) flickered. A small group (at most 2 others of the same kind, each >= 0.15% of
+  the frame) is now lit whole; crowds keep the 70% rule. Attention on the second walker
+  0.37 -> 0.72, third 0.00 -> 0.52; the two-person night clip is unchanged (0.80 / 0.80).
+- **Halo:** the soft mask edge lifted the bright sky behind the silhouettes above SDR white.
+  The native export now hugs the subjects (no dilation, blur <= ~1 mask px): lift 4-8 px
+  outside them 0.20 -> 0.04, on them 0.59 -> 0.85. The tight edge exposed segmentation
+  jitter, so each object's mask is averaged over +-0.12 s aligned to its fitted motion
+  (edge wobble -38%). SDR/HDR video renders keep their softer edge.
+- **Cut-out look:** the subject slider never went to zero: a fixed shadow lift brightened
+  the near-black silhouettes 3.9x even at 1.0x. Now 1.0x is untouched and the lift ramps in
+  with the slider (strength 0.35, was 0.6), and a small share of the light spills onto dark
+  ground near the subject (blurred mask mip, gated to pixels < ~15% of SDR white, so the
+  sky is never lifted). Visually confirmed on the XDR.
+
 ## Status
 
 | Stage | State |

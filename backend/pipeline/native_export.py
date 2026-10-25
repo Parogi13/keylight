@@ -36,6 +36,17 @@ def _semantic_for(job: Path, settings: dict) -> dict:
     return {int(k): v for k, v in entry["decisions"].items()} if entry else {}
 
 
+# The Metal player lifts subjects above SDR white, so a soft mask edge glows wherever the
+# background behind it is bright (silhouettes at dusk). Hug the subject instead: on a beach
+# clip this cut the lift 4-8 px outside the people from 0.20 to 0.04 and raised it on them
+# from 0.59 to 0.85. The SDR/HDR video renders keep their softer edge.
+NATIVE_FEATHER = 0.002
+# A tight edge shows segmentation jitter (the edge wobbling in and out frame to frame), so
+# each object's mask is averaged over +-0.12 s, aligned to its fitted motion: on the beach
+# clip edge wobble fell 38% (0.072 -> 0.045) with the lift on the people unchanged.
+NATIVE_TEMPORAL_S = 0.12
+
+
 def export(job: Path, att: "attention.Attention | None" = None, still_at: float | None = None,
            p: "perceive.Perception | None" = None) -> Path:
     out = job / "native"
@@ -51,6 +62,7 @@ def export(job: Path, att: "attention.Attention | None" = None, still_at: float 
         att = attention.build(p, smoothing=float(settings.get("smoothing", 0.6)),
                               semantic=_semantic_for(job, settings) or None,
                               companions=not (settings.get("focus") or "").strip())
+    att = att.tightened(NATIVE_FEATHER, temporal=max(1, round(p.fps * NATIVE_TEMPORAL_S)))
     n = len(p.frames)
 
     tmp = out / "masks.bin.part"

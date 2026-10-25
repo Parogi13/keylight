@@ -89,6 +89,12 @@ class _Track:
     good: tuple | None = None            # (box, packed mask index) of the last trusted mask
 
 
+def _subject(cls: str) -> bool:
+    """Can the attention step light this class (person, vehicle, animal...), or is it a prop?"""
+    from .attention import CLASS_PRIOR
+    return cls in CLASS_PRIOR and cls != "salient region"
+
+
 def _det_score(cls: str, conf: float, box, w: int, h: int) -> float:
     """Per-frame part of attention._scores (no persistence term: the future is unknown)."""
     from .attention import CLASS_PRIOR, DEFAULT_PRIOR
@@ -246,14 +252,20 @@ def run(working: Path, info: video_io.VideoInfo, progress: ProgressFn | None = N
                         if tr.last_mask is None or not tr.last_mask.any()
                         or (tr.unconfirmed >= 2 and tr.last_mask.sum() < 0.0005 * sam_w * sam_h)]:
                 tracks.pop(oid)
-            # New objects: unmatched detections, best attention score first. When all
-            # slots are taken, one replaces the weakest track only with a clear margin.
-            for k in sorted(range(len(dets)), key=lambda k: -score[k]):
+            # New objects: unmatched detections. Things attention can light (people,
+            # vehicles, animals: attention.CLASS_PRIOR) come before props such as a
+            # surfboard, then best attention score. When all slots are taken, a newcomer
+            # replaces the weakest track only with a clear margin, and a prop never
+            # displaces a subject (a big surfboard once took a walker's slot).
+            for k in sorted(range(len(dets)), key=lambda k: (not _subject(dets[k][0]), -score[k])):
                 if k in used:
                     continue
                 if len(tracks) >= max_objects:
-                    weakest = min(tracks.values(), key=lambda tr: tr.score)
-                    if score[k] <= SWITCH_MARGIN * weakest.score:
+                    weakest = min(tracks.values(), key=lambda tr: (_subject(tr.cls), tr.score))
+                    new_subject, weak_subject = _subject(dets[k][0]), _subject(weakest.cls)
+                    if not new_subject and weak_subject:
+                        continue
+                    if new_subject == weak_subject and score[k] <= SWITCH_MARGIN * weakest.score:
                         continue
                     tracks.pop(weakest.id)
                 cls, cf, b = dets[k]
