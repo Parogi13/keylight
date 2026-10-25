@@ -16,7 +16,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -120,10 +119,24 @@ def _ask(client, model: str, img: np.ndarray, objs, focus: str | None, previous:
         ]}],
     )
     raw = "".join(getattr(b, "text", "") for b in msg.content)
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
+    return _decision(raw, objs)
+
+
+def _decision(raw: str, objs) -> dict | None:
+    """The first JSON object in the reply, validated against the detected objects.
+
+    Only the first object is read: a reply that adds a sentence (or a second object)
+    after its JSON must not fail the whole shot. Unreadable replies return None.
+    """
+    start = raw.find("{")
+    if start < 0:
         return None
-    data = json.loads(m.group(0))
+    try:
+        data, _ = json.JSONDecoder().raw_decode(raw, start)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
     target = data.get("target")
     ids = {o.id for o in objs}
     if target is not None:
